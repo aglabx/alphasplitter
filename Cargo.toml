@@ -1,0 +1,58 @@
+[package]
+name = "alphasplitter"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "pass1_filter_strand"
+path = "src/bin/pass1_filter_strand.rs"
+
+[[bin]]
+name = "pass2_anchor_discovery"
+path = "src/bin/pass2_anchor_discovery.rs"
+
+[[bin]]
+name = "pass3_cluster_alphabet"
+path = "src/bin/pass3_cluster_alphabet.rs"
+
+[[bin]]
+name = "motif_graph"
+path = "src/bin/motif_graph.rs"
+
+[[bin]]
+name = "motif_cut"
+path = "src/bin/motif_cut.rs"
+
+[[bin]]
+name = "discover_motifs"
+path = "src/bin/discover_motifs.rs"
+
+[[bin]]
+name = "discover_chains"
+path = "src/bin/discover_chains.rs"
+
+[[bin]]
+name = "find_phase"
+path = "src/bin/find_phase.rs"
+
+[dependencies]
+rayon = "1.8"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+csv = "1.3"
+[[bin]]
+name = "find_box"
+path = "src/bin/find_box.rs"
+
+[[bin]]
+name = "find_periodic_boxes"
+path = "src/bin/find_periodic_boxes.rs"
+
+[[bin]]
+name = "cenpb_spacing"
+path = "src/bin/cenpb_spacing.rs"
+
+[[bin]]
+name = "annotate_cenpb"
+path = "src/bin/annotate_cenpb.rs"
