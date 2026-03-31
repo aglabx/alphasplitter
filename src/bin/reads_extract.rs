@@ -1,39 +1,49 @@
 use std::io::{BufRead, BufReader, Write, Read as IoRead};
 use std::process::{Command, Stdio};
+use std::sync::{Arc, Mutex};
+use std::thread;
 
-/// Pass 1: Extract reads containing satellite DNA anchor sites.
-/// Streams FASTQ(.gz), checks for chain anchor sites, outputs matching reads as FASTA.
+/// Pass 1: Extract reads containing satellite DNA by chain grammar check.
+/// Not just motif presence — checks ORDER and DISTANCES between motifs.
+/// A read passes only if motifs appear in chain order at expected spacing.
 ///
-/// Usage: reads_extract <input.fastq.gz> <chains.json> [min_sites] [threads]
-///
-/// A read passes if it contains >= min_sites distinct anchor sites (default: 3).
+/// Usage: reads_extract <input.fastq.gz> <chains.json> [min_chain_hits=3]
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 3 {
-        eprintln!("Usage: reads_extract <input.fastq.gz> <chains.json> [min_sites=3]");
+        eprintln!("Usage: reads_extract <input.fastq.gz> <chains.json> [min_chain_hits=3]");
         std::process::exit(1);
     }
     let input = &args[1];
     let chains_path = &args[2];
-    let min_sites: usize = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(3);
+    let min_chain_hits: usize = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(3);
+    let n_threads: usize = args.get(4).and_then(|s| s.parse().ok()).unwrap_or(8);
 
-    // Load chain sites from JSON
-    let sites = load_chain_sites(chains_path);
-    eprintln!("Loaded {} anchor sites from {}", sites.len(), chains_path);
-    for (i, s) in sites.iter().enumerate() {
-        eprintln!("  site{}: {} ({}bp)", i, String::from_utf8_lossy(s), s.len());
+    // Load chain: motifs with positions
+    let chain = load_chain(chains_path);
+    let period = chain.period;
+    eprintln!("Chain: period={}bp, {} motifs", period, chain.motifs.len());
+    for m in &chain.motifs {
+        eprintln!("  {} pos={} seq={} ({}bp) hpc={}",
+            m.name, m.position, String::from_utf8_lossy(&m.seq), m.seq.len(),
+            String::from_utf8_lossy(&m.seq_hpc));
     }
-    eprintln!("Min sites per read: {}", min_sites);
+    eprintln!("Min chain hits: {}", min_chain_hits);
 
-    // Also prepare homopolymer-compressed versions of sites
-    let sites_hpc: Vec<Vec<u8>> = sites.iter().map(|s| hpc(s)).collect();
-    eprintln!("HPC sites:");
-    for (i, s) in sites_hpc.iter().enumerate() {
-        eprintln!("  site{}_hpc: {} ({}bp)", i, String::from_utf8_lossy(s), s.len());
+    // Expected pairwise distances between consecutive motifs
+    let mut expected_dists: Vec<(usize, usize, usize)> = Vec::new(); // (motif_i, motif_j, expected_dist)
+    for i in 0..chain.motifs.len() {
+        let j = (i + 1) % chain.motifs.len();
+        let dist = if chain.motifs[j].position > chain.motifs[i].position {
+            chain.motifs[j].position - chain.motifs[i].position
+        } else {
+            period - chain.motifs[i].position + chain.motifs[j].position
+        };
+        expected_dists.push((i, j, dist));
+        eprintln!("  {} -> {}: expected {}bp", chain.motifs[i].name, chain.motifs[j].name, dist);
     }
 
-    // Open input
     let is_gzipped = input.ends_with(".gz");
     let is_fastq = input.contains(".fastq") || input.contains(".fq");
 
@@ -61,71 +71,154 @@ fn main() {
     let mut total_bp = 0usize;
     let mut passed_bp = 0usize;
 
+    let chain = Arc::new(chain);
+    let expected_dists = Arc::new(expected_dists);
+    let batch_size = 10000;
+
     loop {
-        // Read one FASTQ record
-        let header = match lines.next() {
-            Some(Ok(l)) => l,
-            _ => break,
-        };
-        let seq = match lines.next() {
-            Some(Ok(l)) => l,
-            _ => break,
-        };
-        if is_fastq {
-            let _ = lines.next(); // +
-            let _ = lines.next(); // qual
-        }
-
-        total_reads += 1;
-        total_bp += seq.len();
-
-        // Check: how many distinct sites found in this read?
-        let seq_bytes = seq.as_bytes();
-        let seq_upper: Vec<u8> = seq_bytes.iter().map(|b| b.to_ascii_uppercase()).collect();
-        let seq_hpc = hpc(&seq_upper);
-        let rc = revcomp(&seq_upper);
-        let rc_hpc = hpc(&rc);
-
-        let mut found_sites = 0usize;
-        for (site, site_hpc) in sites.iter().zip(sites_hpc.iter()) {
-            // Try exact match first
-            let found = contains_subseq(&seq_upper, site)
-                || contains_subseq(&rc, site)
-                // Then HPC match
-                || contains_subseq(&seq_hpc, site_hpc)
-                || contains_subseq(&rc_hpc, site_hpc);
-            if found {
-                found_sites += 1;
+        // Read batch
+        let mut batch: Vec<(String, String)> = Vec::with_capacity(batch_size);
+        for _ in 0..batch_size {
+            let header = match lines.next() {
+                Some(Ok(l)) => l,
+                _ => break,
+            };
+            let seq = match lines.next() {
+                Some(Ok(l)) => l,
+                _ => break,
+            };
+            if is_fastq {
+                let _ = lines.next();
+                let _ = lines.next();
             }
+            total_bp += seq.len();
+            total_reads += 1;
+            batch.push((header, seq));
         }
 
-        if found_sites >= min_sites {
+        if batch.is_empty() { break; }
+
+        // Process batch in parallel
+        let chunk_size = (batch.len() + n_threads - 1) / n_threads;
+        let batch_arc = Arc::new(batch);
+        let mut handles = Vec::new();
+        let results: Arc<Mutex<Vec<(String, String, usize)>>> = Arc::new(Mutex::new(Vec::new()));
+
+        for t in 0..n_threads {
+            let batch_arc = Arc::clone(&batch_arc);
+            let chain = Arc::clone(&chain);
+            let expected_dists = Arc::clone(&expected_dists);
+            let results = Arc::clone(&results);
+            let start = t * chunk_size;
+            let end = ((t + 1) * chunk_size).min(batch_arc.len());
+
+            handles.push(thread::spawn(move || {
+                let mut local_results = Vec::new();
+                for idx in start..end {
+                    let (ref header, ref seq) = batch_arc[idx];
+                    let seq_upper: Vec<u8> = seq.as_bytes().iter().map(|b| b.to_ascii_uppercase()).collect();
+                    let score_fwd = check_chain_grammar(&seq_upper, &chain, &expected_dists, period);
+                    let best = if score_fwd >= min_chain_hits {
+                        score_fwd
+                    } else {
+                        let rc = revcomp(&seq_upper);
+                        let score_rc = check_chain_grammar(&rc, &chain, &expected_dists, period);
+                        score_fwd.max(score_rc)
+                    };
+                    if best >= min_chain_hits {
+                        local_results.push((header.clone(), seq.clone(), best));
+                    }
+                }
+                results.lock().unwrap().extend(local_results);
+            }));
+        }
+        for h in handles { h.join().unwrap(); }
+
+        // Write results
+        let res = results.lock().unwrap();
+        for (header, seq, score) in res.iter() {
             passed_reads += 1;
             passed_bp += seq.len();
-            // Output as FASTA
-            let name = if header.starts_with('@') { &header[1..] } else { &header[1..] };
-            writeln!(out, ">{} sites={}", name.split_whitespace().next().unwrap_or(name), found_sites).unwrap();
+            let name = if header.starts_with('@') || header.starts_with('>') {
+                &header[1..]
+            } else {
+                header
+            };
+            writeln!(out, ">{} chain_score={}", name.split_whitespace().next().unwrap_or(name), score).unwrap();
             writeln!(out, "{}", seq).unwrap();
         }
 
-        if total_reads % 100000 == 0 {
-            eprintln!("\r  {} reads, {} passed ({:.1}%), {:.1}Gb",
+        if total_reads % 100000 < batch_size {
+            eprintln!("  {} reads, {} passed ({:.1}%), {:.1}Gb",
                 total_reads, passed_reads,
-                passed_reads as f64 / total_reads as f64 * 100.0,
+                if total_reads > 0 { passed_reads as f64 / total_reads as f64 * 100.0 } else { 0.0 },
                 total_bp as f64 / 1e9);
         }
     }
 
     out.flush().unwrap();
 
-    eprintln!("\n\nDone:");
-    eprintln!("  Total reads: {}", total_reads);
-    eprintln!("  Passed reads: {} ({:.2}%)", passed_reads, passed_reads as f64 / total_reads as f64 * 100.0);
-    eprintln!("  Total bp: {:.2}Gb", total_bp as f64 / 1e9);
-    eprintln!("  Passed bp: {:.2}Gb ({:.2}%)", passed_bp as f64 / 1e9, passed_bp as f64 / total_bp as f64 * 100.0);
+    eprintln!("\nDone:");
+    eprintln!("  Total: {} reads, {:.2}Gb", total_reads, total_bp as f64 / 1e9);
+    eprintln!("  Passed: {} reads ({:.2}%), {:.2}Gb",
+        passed_reads,
+        if total_reads > 0 { passed_reads as f64 / total_reads as f64 * 100.0 } else { 0.0 },
+        passed_bp as f64 / 1e9);
 }
 
-/// Homopolymer compression: AAACCCGT → ACGT
+/// Check if sequence contains chain motifs in correct order with correct distances.
+/// Returns number of chain-consistent motif pairs found.
+/// Optimized: early exit once min_required reached, only check nearby hits.
+fn check_chain_grammar(
+    seq: &[u8],
+    chain: &Chain,
+    expected_dists: &[(usize, usize, usize)],
+    period: usize,
+) -> usize {
+    // Find all motif hits (use HPC for ONT tolerance)
+    let seq_hpc = hpc(seq);
+    let mut hits: Vec<(usize, usize)> = Vec::new(); // (approx_orig_pos, motif_idx)
+
+    for (mi, motif) in chain.motifs.iter().enumerate() {
+        if motif.seq_hpc.len() > seq_hpc.len() { continue; }
+        for i in 0..=seq_hpc.len() - motif.seq_hpc.len() {
+            if &seq_hpc[i..i + motif.seq_hpc.len()] == &motif.seq_hpc[..] {
+                let orig_pos = hpc_to_orig_pos(seq, i);
+                hits.push((orig_pos, mi));
+            }
+        }
+    }
+
+    if hits.len() < 2 { return 0; }
+    hits.sort_by_key(|h| h.0);
+
+    // Only check consecutive hits (not all pairs) — O(N) not O(N²)
+    let tolerance = (period as f64 * 0.3) as usize;
+    let mut consistent_pairs = 0usize;
+    let max_look_ahead = 5; // only check next 5 hits, not all
+
+    for w in 0..hits.len() - 1 {
+        let (pos_a, mi_a) = hits[w];
+        let end = (w + max_look_ahead).min(hits.len());
+        for v in w + 1..end {
+            let (pos_b, mi_b) = hits[v];
+            if pos_b - pos_a > period * 2 { break; }
+
+            for &(exp_i, exp_j, exp_dist) in expected_dists {
+                if mi_a == exp_i && mi_b == exp_j {
+                    let actual_dist = pos_b - pos_a;
+                    if actual_dist.abs_diff(exp_dist) <= tolerance {
+                        consistent_pairs += 1;
+                        if consistent_pairs >= 3 { return consistent_pairs; } // early exit: it's satellite
+                    }
+                }
+            }
+        }
+    }
+
+    consistent_pairs
+}
+
 fn hpc(seq: &[u8]) -> Vec<u8> {
     let mut result = Vec::with_capacity(seq.len());
     for &b in seq {
@@ -136,9 +229,19 @@ fn hpc(seq: &[u8]) -> Vec<u8> {
     result
 }
 
-fn contains_subseq(haystack: &[u8], needle: &[u8]) -> bool {
-    if needle.len() > haystack.len() { return false; }
-    haystack.windows(needle.len()).any(|w| w == needle)
+fn hpc_to_orig_pos(orig: &[u8], hpc_pos: usize) -> usize {
+    let mut hpc_idx = 0usize;
+    let mut prev = 0u8;
+    for (i, &b) in orig.iter().enumerate() {
+        if b != prev {
+            if hpc_idx == hpc_pos {
+                return i;
+            }
+            hpc_idx += 1;
+            prev = b;
+        }
+    }
+    orig.len()
 }
 
 fn revcomp(seq: &[u8]) -> Vec<u8> {
@@ -151,29 +254,104 @@ fn which_exists(cmd: &str) -> bool {
     Command::new("which").arg(cmd).output().map(|o| o.status.success()).unwrap_or(false)
 }
 
-fn load_chain_sites(path: &str) -> Vec<Vec<u8>> {
-    // Parse chains.json to extract site sequences
-    // Format: look for "seq": "ACATCACAAAG" patterns
-    let content = std::fs::read_to_string(path).expect("Cannot read chains file");
-    let mut sites = Vec::new();
+struct Motif {
+    name: String,
+    seq: Vec<u8>,
+    seq_hpc: Vec<u8>,
+    position: usize,
+}
 
+struct Chain {
+    period: usize,
+    motifs: Vec<Motif>,
+}
+
+fn load_chain(path: &str) -> Chain {
+    let content = std::fs::read_to_string(path).expect("Cannot read chains file");
+
+    // Extract period
+    let mut period = 171usize; // default
     for line in content.lines() {
-        let line = line.trim();
-        if let Some(start) = line.find("\"seq\"") {
-            // Extract the sequence value
-            if let Some(colon) = line[start..].find(':') {
-                let after_colon = &line[start + colon + 1..];
-                if let Some(q1) = after_colon.find('"') {
-                    if let Some(q2) = after_colon[q1 + 1..].find('"') {
-                        let seq = &after_colon[q1 + 1..q1 + 1 + q2];
-                        let seq_bytes = seq.as_bytes().to_vec();
-                        if seq_bytes.len() >= 6 && !sites.contains(&seq_bytes) {
-                            sites.push(seq_bytes);
-                        }
-                    }
+        if line.contains("\"target_period\"") {
+            if let Some(colon) = line.find(':') {
+                let val = line[colon + 1..].trim().trim_matches(|c: char| !c.is_numeric());
+                if let Ok(p) = val.parse::<usize>() {
+                    if p > 0 { period = p; }
                 }
             }
         }
     }
-    sites
+
+    // Extract motifs
+    let mut motifs = Vec::new();
+    let mut i = 0;
+    let lines: Vec<&str> = content.lines().collect();
+
+    while i < lines.len() {
+        let line = lines[i].trim();
+
+        // Look for motif objects with "sequence" and "position_in_monomer"
+        if line.contains("\"sequence\"") && line.contains(":") {
+            let mut name = String::new();
+            let mut seq = String::new();
+            let mut pos = 0usize;
+
+            // Scan nearby lines for name, sequence, position
+            let start = if i >= 5 { i - 5 } else { 0 };
+            let end = (i + 5).min(lines.len());
+            for j in start..end {
+                let l = lines[j].trim();
+                if l.contains("\"name\"") {
+                    name = extract_string_value(l);
+                }
+                if l.contains("\"sequence\"") || l.contains("\"seq\"") {
+                    seq = extract_string_value(l);
+                }
+                if l.contains("\"position_in_monomer\"") || l.contains("\"position\"") {
+                    pos = extract_number_value(l);
+                }
+            }
+
+            if !seq.is_empty() && seq.len() >= 6 {
+                let seq_bytes: Vec<u8> = seq.bytes().map(|b| b.to_ascii_uppercase()).collect();
+                let seq_hpc = hpc(&seq_bytes);
+                if !motifs.iter().any(|m: &Motif| m.seq == seq_bytes) {
+                    motifs.push(Motif {
+                        name: if name.is_empty() { format!("M{}", motifs.len()) } else { name },
+                        seq: seq_bytes,
+                        seq_hpc,
+                        position: pos,
+                    });
+                }
+            }
+        }
+        i += 1;
+    }
+
+    // Sort by position
+    motifs.sort_by_key(|m| m.position);
+
+    Chain { period, motifs }
+}
+
+fn extract_string_value(line: &str) -> String {
+    if let Some(colon) = line.find(':') {
+        let after = &line[colon + 1..];
+        if let Some(q1) = after.find('"') {
+            if let Some(q2) = after[q1 + 1..].find('"') {
+                return after[q1 + 1..q1 + 1 + q2].to_string();
+            }
+        }
+    }
+    String::new()
+}
+
+fn extract_number_value(line: &str) -> usize {
+    if let Some(colon) = line.find(':') {
+        let after = line[colon + 1..].trim().trim_matches(|c: char| !c.is_numeric() && c != '.');
+        if let Ok(n) = after.parse::<f64>() {
+            return n as usize;
+        }
+    }
+    0
 }
