@@ -76,26 +76,23 @@ fn process_read(
     total_monomers: &mut usize,
 ) {
     let seq_upper: Vec<u8> = seq.iter().map(|b| b.to_ascii_uppercase()).collect();
-    let seq_hpc = hpc(&seq_upper);
 
-    // Find all site occurrences (in HPC space for robustness)
-    let mut hits: Vec<(usize, usize, usize)> = Vec::new(); // (hpc_pos, original_pos_approx, site_idx)
+    // Find all site occurrences using exact match (not HPC — too many FP)
+    let mut hits: Vec<(usize, usize, usize)> = Vec::new(); // (pos, pos, site_idx)
 
-    for (si, site_hpc) in sites_hpc.iter().enumerate() {
-        if site_hpc.len() > seq_hpc.len() { continue; }
-        for i in 0..=seq_hpc.len() - site_hpc.len() {
-            if &seq_hpc[i..i + site_hpc.len()] == &site_hpc[..] {
-                // Map HPC position back to approximate original position
-                let orig_pos = hpc_to_orig_pos(&seq_upper, i);
-                hits.push((i, orig_pos, si));
+    for (si, site) in sites.iter().enumerate() {
+        if site.len() > seq_upper.len() { continue; }
+        for i in 0..=seq_upper.len() - site.len() {
+            if &seq_upper[i..i + site.len()] == &site[..] {
+                hits.push((i, i, si));
             }
         }
     }
 
-    // Sort by HPC position
+    // Sort by position
     hits.sort_by_key(|h| h.0);
 
-    // Dedup: keep best hit within 5bp HPC window
+    // Dedup: keep best hit within 5bp window
     let mut deduped: Vec<(usize, usize, usize)> = Vec::new();
     for h in &hits {
         if deduped.last().map_or(true, |last: &(usize, usize, usize)| h.0.abs_diff(last.0) > 3) {
@@ -187,15 +184,17 @@ fn load_chain_sites(path: &str) -> Vec<Vec<u8>> {
     let mut sites = Vec::new();
     for line in content.lines() {
         let line = line.trim();
-        if let Some(start) = line.find("\"seq\"") {
-            if let Some(colon) = line[start..].find(':') {
-                let after_colon = &line[start + colon + 1..];
-                if let Some(q1) = after_colon.find('"') {
-                    if let Some(q2) = after_colon[q1 + 1..].find('"') {
-                        let seq = &after_colon[q1 + 1..q1 + 1 + q2];
-                        let seq_bytes = seq.as_bytes().iter().map(|b| b.to_ascii_uppercase()).collect::<Vec<_>>();
-                        if seq_bytes.len() >= 6 && !sites.contains(&seq_bytes) {
-                            sites.push(seq_bytes);
+        for key in &["\"sequence\"", "\"seq\""] {
+            if let Some(start) = line.find(key) {
+                if let Some(colon) = line[start..].find(':') {
+                    let after_colon = &line[start + colon + 1..];
+                    if let Some(q1) = after_colon.find('"') {
+                        if let Some(q2) = after_colon[q1 + 1..].find('"') {
+                            let seq = &after_colon[q1 + 1..q1 + 1 + q2];
+                            let seq_bytes = seq.as_bytes().iter().map(|b| b.to_ascii_uppercase()).collect::<Vec<_>>();
+                            if seq_bytes.len() >= 6 && !sites.contains(&seq_bytes) {
+                                sites.push(seq_bytes);
+                            }
                         }
                     }
                 }

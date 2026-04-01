@@ -175,16 +175,15 @@ fn check_chain_grammar(
     expected_dists: &[(usize, usize, usize)],
     period: usize,
 ) -> usize {
-    // Find all motif hits (use HPC for ONT tolerance)
-    let seq_hpc = hpc(seq);
-    let mut hits: Vec<(usize, usize)> = Vec::new(); // (approx_orig_pos, motif_idx)
+    // Find all motif hits using ORIGINAL sequences (not HPC — too many FP with short HPC motifs)
+    // ONT accuracy ~95%, 11bp exact match hits ~55% of true sites — enough for chain grammar
+    let mut hits: Vec<(usize, usize)> = Vec::new(); // (pos, motif_idx)
 
     for (mi, motif) in chain.motifs.iter().enumerate() {
-        if motif.seq_hpc.len() > seq_hpc.len() { continue; }
-        for i in 0..=seq_hpc.len() - motif.seq_hpc.len() {
-            if &seq_hpc[i..i + motif.seq_hpc.len()] == &motif.seq_hpc[..] {
-                let orig_pos = hpc_to_orig_pos(seq, i);
-                hits.push((orig_pos, mi));
+        if motif.seq.len() > seq.len() { continue; }
+        for i in 0..=seq.len() - motif.seq.len() {
+            if &seq[i..i + motif.seq.len()] == &motif.seq[..] {
+                hits.push((i, mi));
             }
         }
     }
