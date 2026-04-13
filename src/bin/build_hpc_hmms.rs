@@ -59,7 +59,8 @@ fn main() {
         if !target_letters.contains_key(letter) { continue; }
 
         let seq = fields[fields.len() - 1]; // last column = sequence
-        if seq.len() < 50 { continue; }
+        // Filter: only canonical-length monomers (150-190bp), skip dimers and fragments
+        if seq.len() < 150 || seq.len() > 190 { continue; }
 
         let entry = per_letter.entry(letter.to_string()).or_default();
         if entry.len() >= max_per_letter { continue; }
