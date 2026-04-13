@@ -380,7 +380,7 @@ fn find_best_rotation_multi_anchor(
     seq: &[u8],
     windows: &[AnchorWindow],
     pwms: &[Vec<[f64; 4]>],
-    canon_len: usize,
+    _canon_len: usize,
 ) -> (i32, f64) {
     let n = seq.len();
     let mut best_rot = 0i32;

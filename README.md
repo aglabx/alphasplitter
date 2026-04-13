@@ -6,19 +6,25 @@ AlphaSplitter identifies periodic conserved anchor sites in satellite DNA, assem
 
 ## Quick Start
 
+AlphaSplitter is a set of independent Rust binaries (one per `src/bin/*.rs`), not a single CLI with subcommands. Build once, then call each binary directly.
+
 ```bash
-# Build
-cargo build --release
+# Build all binaries (or: cargo build --release)
+make
 
 # Full auto-satellome (discovers all periods and subfamilies)
-alphasplitter discover-chains input.10kb.fasta -o chains.json -t 96
+./target/release/discover_chains input.10kb.fasta -o chains.json -t 96
 
 # Cut monomers and classify
-alphasplitter motif-cut input.10kb.fasta -m chains.json -o monomers.tsv -t 96
+./target/release/motif_cut input.10kb.fasta -m chains.json -o monomers.tsv -t 96
 
 # Annotate CENP-B boxes
-alphasplitter annotate-cenpb monomers.tsv annotated.tsv
+./target/release/annotate_cenpb monomers.tsv annotated.tsv
 ```
+
+Each binary supports `--help`, e.g. `./target/release/discover_chains --help`.
+
+The `make run INPUT=arrays.10kb.fasta THREADS=96` target chains all three steps end-to-end. Run `make help` to see all targets.
 
 ## What it does
 

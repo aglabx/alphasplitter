@@ -40,7 +40,6 @@ struct Args {
 
 #[derive(Debug, Deserialize)]
 struct MotifsJson {
-    target_period: usize,
     motifs: Vec<MotifDef>,
 }
 
@@ -56,7 +55,6 @@ struct AnchorSet {
     names: Vec<String>,
     sequences: Vec<Vec<u8>>,
     rc_sequences: Vec<Vec<u8>>,
-    positions: Vec<usize>,        // position in canonical monomer
     expected_spacers: Vec<usize>, // spacer to next motif (last = wrap)
     motif_len: usize,
     n_motifs: usize,
@@ -89,7 +87,7 @@ fn load_anchors(path: Option<&str>) -> AnchorSet {
                 let sp = if i < expected_spacers.len() { expected_spacers[i] } else { 0 };
                 eprintln!("  {}: {} ({}bp, pos={}, spacer_next={})", name, String::from_utf8_lossy(&seqs[i]), seqs[i].len(), positions[i], sp);
             }
-            AnchorSet { names, sequences: seqs, rc_sequences: rcs, positions, expected_spacers, motif_len: mlen, n_motifs: n }
+            AnchorSet { names, sequences: seqs, rc_sequences: rcs, expected_spacers, motif_len: mlen, n_motifs: n }
         }
         None => {
             let defaults: Vec<(&str, &str)> = vec![
@@ -102,10 +100,9 @@ fn load_anchors(path: Option<&str>) -> AnchorSet {
             let names: Vec<String> = defaults.iter().map(|(n, _)| n.to_string()).collect();
             let seqs: Vec<Vec<u8>> = defaults.iter().map(|(_, s)| s.as_bytes().to_vec()).collect();
             let rcs: Vec<Vec<u8>> = seqs.iter().map(|s| revcomp(s)).collect();
-            let positions = vec![21, 41, 67, 112, 132]; // v1 positions
             let expected_spacers = vec![9, 15, 34, 9, 49]; // v1 spacers
             eprintln!("Using built-in primate alpha satellite motifs (5 x 11bp)");
-            AnchorSet { names, sequences: seqs, rc_sequences: rcs, positions, expected_spacers, motif_len: 11, n_motifs: 5 }
+            AnchorSet { names, sequences: seqs, rc_sequences: rcs, expected_spacers, motif_len: 11, n_motifs: 5 }
         }
     }
 }
@@ -131,8 +128,6 @@ struct Monomer {
     sequence: String,
     // Which chain sites are present
     site_present: Vec<bool>,
-    // Actual site sequences found in this monomer (empty string if site absent)
-    site_sequences: Vec<String>,
     // Distances between consecutive present sites
     distances: Vec<(usize, usize, i32)>, // (from_site, to_site, distance)
     // Site order string: actual order of found sites as letters (a,b,c,d,e,...)
@@ -160,15 +155,6 @@ struct Letter {
     consensus: String,
     fraction: f64,
     n_subtypes: usize,
-}
-
-/// Subtype = variant within a letter (site mutations)
-#[derive(Debug, Serialize)]
-struct Subtype {
-    letter_name: String,
-    subtype_name: String, // A1, A2, A3...
-    size: usize,
-    site_sequences: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -455,7 +441,7 @@ fn cut_at_motifs(array_id: &str, seq: &[u8], hits: &[MotifHit], n_motifs: usize,
         .collect();
 
     // If not enough M1 hits, use whatever motif is most frequent
-    let (start_motif, start_positions) = if m1_hits.len() >= 2 {
+    let (_start_motif, start_positions) = if m1_hits.len() >= 2 {
         (0usize, m1_hits)
     } else {
         // Find motif with most hits
@@ -529,23 +515,9 @@ fn cut_at_motifs(array_id: &str, seq: &[u8], hits: &[MotifHit], n_motifs: usize,
 
                 // Sites between si and sj in chain order
                 if sj <= si { continue; } // only forward chain order
-                let si_len = anchor_names[si].len();
 
                 for mid in (si + 1)..sj {
                     if site_present[mid] { continue; } // already found exact
-
-                    // Expected distance from si to mid
-                    let mut expected_pos = pos_i + si_len; // end of si
-                    for k in (si + 1)..=mid {
-                        if k < mid {
-                            expected_pos += 20; // rough default spacer estimate
-                            expected_pos += anchor_names[k].len();
-                        }
-                    }
-                    // More precise: expected = pos_i + cumulative (spacers + motif lengths) from chain
-                    // For now use observed distance analysis:
-                    // If the total distance si→sj matches expected with all mids present,
-                    // then mids are present (with possible SNPs)
 
                     // Compute expected distance si→sj using real chain spacers
                     let total_expected = {
@@ -710,7 +682,6 @@ fn cut_at_motifs(array_id: &str, seq: &[u8], hits: &[MotifHit], n_motifs: usize,
             length,
             sequence: String::from_utf8_lossy(mono_seq).to_string(),
             site_present,
-            site_sequences,
             distances,
             site_order,
             site_structure,
@@ -856,7 +827,7 @@ fn align_and_cigar(reference: &[u8], query: &[u8]) -> (String, String) {
     while i > 0 || j > 0 {
         match state {
             'M' if i > 0 && j > 0 => {
-                let s = if reference[i-1].to_ascii_uppercase() == query[j-1].to_ascii_uppercase() { match_score } else { mismatch };
+                let _s = if reference[i-1].to_ascii_uppercase() == query[j-1].to_ascii_uppercase() { match_score } else { mismatch };
                 let op = if reference[i-1].to_ascii_uppercase() == query[j-1].to_ascii_uppercase() { 'M' } else { 'X' };
                 aligned_query.push(query[j-1]);
                 if let Some(last) = cigar_ops.last_mut() {

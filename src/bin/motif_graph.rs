@@ -140,10 +140,10 @@ fn main() {
     // --- Step 3: Build edges from consecutive hits ---
     eprintln!("Building transition graph...");
 
-    let mut all_edges: Vec<Edge> = Vec::new();
+    let _all_edges: Vec<Edge> = Vec::new();
     let mut edge_counts: HashMap<Edge, u64> = HashMap::new();
 
-    for (array_name, array_len, hits) in &array_hits {
+    for (_array_name, _array_len, hits) in &array_hits {
         if hits.len() < 2 { continue; }
 
         // Hits are already sorted by position from scan_motifs
@@ -204,7 +204,7 @@ fn main() {
         let median = if !lengths.is_empty() {
             let mut cum = 0u64;
             let half = total / 2;
-            lengths.iter().find(|&&(l, c)| { cum += c; cum >= half }).map(|&(l, _)| l).unwrap_or(0)
+            lengths.iter().find(|&&(_l, c)| { cum += c; cum >= half }).map(|&(l, _)| l).unwrap_or(0)
         } else { 0 };
 
         // Expected distance based on anchor positions in canonical monomer

@@ -104,7 +104,7 @@ fn main() {
     let hits_rc = *hits_rc.lock().unwrap();
 
     let total_sp: usize = spacings.values().sum();
-    let period_guess = if total_bp > 0 { total_bp as f64 / (total_hits as f64 / 2.0) } else { 0.0 };
+    let _period_guess = if total_bp > 0 { total_bp as f64 / (total_hits as f64 / 2.0) } else { 0.0 };
 
     println!("# CENP-B box spacing (score >= {})", min_score);
     println!("# {} arrays, {:.1}Mb", arrays.len(), total_bp as f64 / 1e6);

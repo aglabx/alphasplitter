@@ -126,9 +126,9 @@ fn main() {
     eprintln!("  Distance matrix computed ({:.1} MB)", (n_sub * n_sub * 2) as f64 / 1e6);
 
     // --- Step 3: Find optimal k using silhouette score ---
-    let (best_k, best_assignments, best_silhouette) = if args.target_k > 0 {
+    let (_best_k, best_assignments, best_silhouette) = if args.target_k > 0 {
         eprintln!("Running k-medoids with k={}...", args.target_k);
-        let (assign, medoids) = kmedoids(&dist_matrix, n_sub, args.target_k, args.iterations);
+        let (assign, _medoids) = kmedoids(&dist_matrix, n_sub, args.target_k, args.iterations);
         let sil = silhouette_score(&dist_matrix, n_sub, &assign);
         eprintln!("  k={}, silhouette={:.4}", args.target_k, sil);
         (args.target_k, assign, sil)
@@ -140,7 +140,7 @@ fn main() {
 
         // Scan in steps for speed, then refine
         let step = 5;
-        let mut candidates: Vec<usize> = (args.min_k..=args.max_k).step_by(step).collect();
+        let candidates: Vec<usize> = (args.min_k..=args.max_k).step_by(step).collect();
 
         for &k in &candidates {
             let (assign, _) = kmedoids(&dist_matrix, n_sub, k, args.iterations);

@@ -69,7 +69,7 @@ fn process_read(
     name: &str,
     seq: &[u8],
     sites: &[Vec<u8>],
-    sites_hpc: &[Vec<u8>],
+    _sites_hpc: &[Vec<u8>],
     site_names: &[String],
     out: &mut impl Write,
     total_reads: &mut usize,
@@ -105,7 +105,7 @@ fn process_read(
     }
 
     // Build site_order string and letter string
-    let site_order: String = deduped.iter()
+    let _site_order: String = deduped.iter()
         .map(|(_, _, si)| site_names[*si].as_str())
         .collect::<Vec<_>>()
         .join("");
@@ -151,22 +151,6 @@ fn process_read(
     if *total_reads % 10000 == 0 {
         eprintln!("\r  {} reads, {} monomers", total_reads, total_monomers);
     }
-}
-
-/// Map HPC position back to approximate original sequence position
-fn hpc_to_orig_pos(orig: &[u8], hpc_pos: usize) -> usize {
-    let mut hpc_idx = 0usize;
-    let mut prev = 0u8;
-    for (i, &b) in orig.iter().enumerate() {
-        if b != prev {
-            if hpc_idx == hpc_pos {
-                return i;
-            }
-            hpc_idx += 1;
-            prev = b;
-        }
-    }
-    orig.len()
 }
 
 fn hpc(seq: &[u8]) -> Vec<u8> {

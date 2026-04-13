@@ -228,21 +228,6 @@ fn hpc(seq: &[u8]) -> Vec<u8> {
     result
 }
 
-fn hpc_to_orig_pos(orig: &[u8], hpc_pos: usize) -> usize {
-    let mut hpc_idx = 0usize;
-    let mut prev = 0u8;
-    for (i, &b) in orig.iter().enumerate() {
-        if b != prev {
-            if hpc_idx == hpc_pos {
-                return i;
-            }
-            hpc_idx += 1;
-            prev = b;
-        }
-    }
-    orig.len()
-}
-
 fn revcomp(seq: &[u8]) -> Vec<u8> {
     seq.iter().rev().map(|&b| match b {
         b'A' => b'T', b'T' => b'A', b'C' => b'G', b'G' => b'C', _ => b'N',

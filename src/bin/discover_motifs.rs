@@ -187,7 +187,7 @@ fn main() {
 
     // --- Step 3: Build conservation profile ---
     eprintln!("Building conservation profile...");
-    let n_mono = all_monomers.len();
+    let _n_mono = all_monomers.len();
     let mut profile = vec![[0u32; 5]; target_period]; // A,C,G,T,other
 
     for (i, mono) in all_monomers.iter().enumerate() {

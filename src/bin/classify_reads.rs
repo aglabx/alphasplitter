@@ -119,7 +119,7 @@ fn main() {
             let motifs_hpc = Arc::clone(&motifs_hpc);
             let motifs_orig = Arc::clone(&motifs_orig);
             let alphabet = Arc::clone(&alphabet);
-            let expected_dists = Arc::clone(&expected_dists);
+            let _expected_dists = Arc::clone(&expected_dists);
             let results = Arc::clone(&results);
             let letter_counts_global = Arc::clone(&letter_counts_global);
             let start = t * chunk_size;
@@ -388,14 +388,13 @@ fn load_motifs(path: &str) -> Vec<Motif> {
     motifs
 }
 
-fn load_alphabet(path: &str, n_motifs: usize) -> HashMap<String, String> {
+fn load_alphabet(path: &str, _n_motifs: usize) -> HashMap<String, String> {
     let content = std::fs::read_to_string(path).unwrap();
     let mut alphabet = HashMap::new();
 
     // Parse JSON manually: look for "key" and "name" pairs
     let lines: Vec<&str> = content.lines().collect();
     let mut current_key = String::new();
-    let mut current_name = String::new();
 
     for line in &lines {
         let line = line.trim();
@@ -403,12 +402,12 @@ fn load_alphabet(path: &str, n_motifs: usize) -> HashMap<String, String> {
             current_key = extract_str(line);
         }
         if line.contains("\"name\"") && !current_key.is_empty() {
-            current_name = extract_str(line);
+            let current_name = extract_str(line);
             if !current_name.is_empty() && !current_key.is_empty() {
                 // Expand key to full n_motifs presence pattern if needed
                 // Key format: "11111:20,20,40,20" (5 sites) → need to expand to n_motifs sites
                 // For now, store as-is and match by presence prefix
-                alphabet.insert(current_key.clone(), current_name.clone());
+                alphabet.insert(current_key.clone(), current_name);
             }
             current_key.clear();
         }

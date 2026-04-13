@@ -90,8 +90,8 @@ fn main() {
 
     // Score distribution
     eprintln!("\nScore distribution:");
-    let mut score_counts = vec![0usize; n_fixed + 1];
-    for (_, seq, _) in &results {
+    let _score_counts = vec![0usize; n_fixed + 1];
+    for (_, _seq, _) in &results {
         // Recalculate for score dist
     }
 
@@ -106,13 +106,6 @@ fn revcomp(seq: &str) -> String {
         b'A' | b'a' => b'T', b'T' | b't' => b'A',
         b'C' | b'c' => b'G', b'G' | b'g' => b'C', o => o,
     } as char).collect()
-}
-
-fn revcomp_bytes(seq: &[u8]) -> Vec<u8> {
-    seq.iter().rev().map(|&b| match b {
-        b'A' | b'a' => b'T', b'T' | b't' => b'A',
-        b'C' | b'c' => b'G', b'G' | b'g' => b'C', o => o,
-    }).collect()
 }
 
 fn read_all_arrays(path: &str) -> Vec<(String, String)> {

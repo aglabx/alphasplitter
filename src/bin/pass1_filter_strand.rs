@@ -138,7 +138,7 @@ fn main() {
 }
 
 fn find_seed_medoid(arrays: &std::collections::HashMap<String, Vec<alphasplitter::monomer::Monomer>>, sample_size: usize) -> String {
-    use std::collections::HashMap;
+    
 
     // Collect all sequences
     let all_seqs: Vec<&str> = arrays.values()
@@ -149,8 +149,8 @@ fn find_seed_medoid(arrays: &std::collections::HashMap<String, Vec<alphasplitter
     let sample: Vec<&str> = if all_seqs.len() <= sample_size {
         all_seqs
     } else {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
+        
+        
         let mut selected = Vec::with_capacity(sample_size);
         let step = all_seqs.len() / sample_size;
         for i in (0..all_seqs.len()).step_by(step.max(1)).take(sample_size) {

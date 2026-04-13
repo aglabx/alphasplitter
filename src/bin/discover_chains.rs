@@ -232,7 +232,6 @@ fn main() {
     let mut working_arrays: Vec<(String, Vec<u8>)> = sf_seed_arrays;
     let mut prev_n_arrays = 0usize;
     let mut final_sites: Vec<Site> = Vec::new();
-    let mut final_links: Vec<Link> = Vec::new();
     let mut final_chains: Vec<Chain> = Vec::new();
     let mut final_n_compatible = 0usize;
     let mut final_enriched: Vec<ArraySignature> = Vec::new();
@@ -369,7 +368,7 @@ fn main() {
     let hash_to_seq = decode_kmer_sequences(&working_arrays, k, &candidate_hashes);
 
     // Build Site objects
-    let mut sites: Vec<Site> = candidates.iter().enumerate().map(|(i, c)| {
+    let sites: Vec<Site> = candidates.iter().enumerate().map(|(i, c)| {
         let seq = hash_to_seq.get(&c.hash).cloned().unwrap_or_else(|| format!("?k{}", c.hash));
         Site {
             id: i,
@@ -520,7 +519,6 @@ fn main() {
         }
 
         // For each pair of found sites, check distance
-        let mut n_pairs_checked = 0usize;
         let mut n_pairs_ok = 0usize;
 
         // Collect (chain_index, all_positions) for found sites
@@ -536,7 +534,7 @@ fn main() {
                 let si_a = chain_order[ci_a];
                 let si_b = chain_order[ci_b];
 
-                let expected_d = cum_dist[ci_b] - cum_dist[ci_a] - site_seqs[si_a].len() as f64;
+                let _expected_d = cum_dist[ci_b] - cum_dist[ci_a] - site_seqs[si_a].len() as f64;
                 // But we want spacer distance (not including site_a length)
                 // Actually cum_dist already includes site lengths, so:
                 let expected_total = cum_dist[ci_b] - cum_dist[ci_a]; // includes sites + spacers from A to B
@@ -558,7 +556,6 @@ fn main() {
                     if pair_ok { break; }
                 }
 
-                n_pairs_checked += 1;
                 if pair_ok { n_pairs_ok += 1; }
             }
         }
@@ -601,8 +598,8 @@ fn main() {
 
     // Save results from this iteration
     let _n_candidates = candidates.len();
+    let _ = links;
     final_sites = sites;
-    final_links = links;
     final_chains = chains;
     final_n_compatible = n_compatible;
 
@@ -751,7 +748,7 @@ impl AnchorCandidate {
 
 // ============ SITE GROWTH ============
 
-fn grow_sites(sites: Vec<Site>, arrays: &[(String, Vec<u8>)], n_arrays: usize, _min_support_frac: f64) -> Vec<Site> {
+fn grow_sites(sites: Vec<Site>, arrays: &[(String, Vec<u8>)], _n_arrays: usize, _min_support_frac: f64) -> Vec<Site> {
     let max_extend = 30; // generous: entropy will tell us the real boundary
 
     sites.into_iter().map(|site| {
@@ -897,12 +894,12 @@ fn grow_sites(sites: Vec<Site>, arrays: &[(String, Vec<u8>)], n_arrays: usize, _
     }).collect()
 }
 
-fn enforce_spacers(mut sites: Vec<Site>, period: usize) -> Vec<Site> {
+fn enforce_spacers(mut sites: Vec<Site>, _period: usize) -> Vec<Site> {
     // Sort by position
     sites.sort_by_key(|s| s.position_mod_p);
 
     // 1. Remove exact duplicates (same sequence) — keep highest support
-    let before = sites.len();
+    let _before = sites.len();
     let mut seen_seqs: HashMap<String, usize> = HashMap::new(); // seq -> index of best
     let mut keep_dedup = vec![true; sites.len()];
     for (i, s) in sites.iter().enumerate() {
@@ -972,10 +969,6 @@ fn enforce_spacers(mut sites: Vec<Site>, period: usize) -> Vec<Site> {
 
     eprintln!("  {} sites after cleanup", merged.len());
     merged
-}
-
-fn hamming_u8(a: &[u8], b: &[u8]) -> u32 {
-    a.iter().zip(b.iter()).filter(|(x, y)| x.to_ascii_uppercase() != y.to_ascii_uppercase()).count() as u32
 }
 
 // ============ LINK DISCOVERY ============
@@ -1190,20 +1183,6 @@ fn decode_kmer_sequences(arrays: &[(String, Vec<u8>)], k: usize, hashes: &[u64])
         if result.len() == hashes.len() { break; }
     }
     result
-}
-
-fn auto_detect_period(arrays: &[(String, Vec<u8>)]) -> usize {
-    let mut period_counts: HashMap<usize, usize> = HashMap::new();
-    for (name, _) in arrays {
-        let fields: Vec<&str> = name.split('_').collect();
-        if let Some(p) = fields.last().and_then(|s| s.parse::<usize>().ok()) {
-            *period_counts.entry(p).or_insert(0) += 1;
-        }
-    }
-    let mut sorted: Vec<_> = period_counts.into_iter().collect();
-    sorted.sort_by(|a, b| b.1.cmp(&a.1));
-    eprintln!("  Top periods: {:?}", &sorted[..sorted.len().min(5)]);
-    sorted[0].0
 }
 
 // ============ FASTA ============

@@ -13,7 +13,7 @@ fn main() {
         (9, b'A'),
         (12, b'C'), (13, b'G'), (14, b'G'), (15, b'G'),
     ];
-    let var_pos: [usize; 8] = [0, 5, 6, 7, 8, 10, 11, 16];
+    let _var_pos: [usize; 8] = [0, 5, 6, 7, 8, 10, 11, 16];
 
     let file = std::fs::File::open(&args[1]).unwrap();
     let reader = BufReader::new(file);

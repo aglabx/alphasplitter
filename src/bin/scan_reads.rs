@@ -112,12 +112,10 @@ fn main() {
                     _ => break,
                 };
                 let _ = header;
-                let mut seq = String::new();
                 match lines.next() {
-                    Some(Ok(l)) => seq = l,
+                    Some(Ok(l)) => l,
                     _ => break,
                 }
-                seq
             };
 
             bp_count += seq_str.len();
