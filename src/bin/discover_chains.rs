@@ -874,9 +874,14 @@ fn grow_sites(sites: Vec<Site>, arrays: &[(String, Vec<u8>)], n_arrays: usize, _
         let new_sequence = String::from_utf8(new_seq).unwrap();
         let new_position = site.position_mod_p.wrapping_sub(left_ext);
 
-        // Report with entropy at boundaries
-        let h_left = if left_ext > 0 { entropy[max_extend - left_ext - 1] } else { 2.0 };
-        let h_right = if right_ext > 0 { entropy[max_extend + seed_len + right_ext] } else { 2.0 };
+        // Report with entropy at boundaries (positions just outside the grown region)
+        let h_left = if left_ext > 0 && left_ext < max_extend {
+            entropy[max_extend - left_ext - 1]
+        } else { 2.0 };
+        let h_right = {
+            let p = max_extend + seed_len + right_ext;
+            if right_ext > 0 && p < context_len { entropy[p] } else { 2.0 }
+        };
         let h_core = entropy[max_extend..max_extend + seed_len].iter().sum::<f64>() / seed_len as f64;
 
         eprintln!("  {} → {} ({} → {} bp, L+{} R+{}) H_core={:.2} H_left_boundary={:.2} H_right_boundary={:.2}",
