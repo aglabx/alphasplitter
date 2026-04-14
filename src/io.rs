@@ -4,6 +4,42 @@ use std::fs::File;
 
 use crate::monomer::Monomer;
 
+/// Read a FASTA file into `(name, sequence_bytes)` pairs. Sequences are
+/// uppercased on read so downstream code can assume ASCII-upper ACGTN.
+pub fn read_fasta(path: &str) -> Vec<(String, Vec<u8>)> {
+    let file = File::open(path).unwrap_or_else(|e| panic!("Cannot open {}: {}", path, e));
+    let reader = BufReader::with_capacity(64 * 1024 * 1024, file);
+    let mut arrays: Vec<(String, Vec<u8>)> = Vec::new();
+    let mut name = String::new();
+    let mut seq: Vec<u8> = Vec::new();
+
+    for line in reader.lines() {
+        let line = line.unwrap();
+        if line.starts_with('>') {
+            if !name.is_empty() && !seq.is_empty() {
+                arrays.push((std::mem::take(&mut name), std::mem::take(&mut seq)));
+            }
+            name = line[1..].trim().to_string();
+            seq.clear();
+        } else {
+            seq.extend(line.trim().bytes().map(|b| b.to_ascii_uppercase()));
+        }
+    }
+    if !name.is_empty() && !seq.is_empty() {
+        arrays.push((name, seq));
+    }
+    arrays
+}
+
+/// Same as [`read_fasta`] but returns the sequence as a `String` — convenient
+/// for callers that work with `&str` slices.
+pub fn read_fasta_strings(path: &str) -> Vec<(String, String)> {
+    read_fasta(path)
+        .into_iter()
+        .map(|(n, s)| (n, String::from_utf8(s).expect("non-UTF8 FASTA bytes")))
+        .collect()
+}
+
 /// Read ArraySplitter .monomers.tsv and filter alpha satellite base monomers.
 /// Returns (monomers grouped by array_id, header_indices)
 pub fn read_monomers_tsv(

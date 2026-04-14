@@ -2,6 +2,8 @@ use std::collections::HashMap;
 use clap::Parser;
 use rayon::prelude::*;
 use serde::Serialize;
+use alphasplitter::monomer::revcomp;
+use alphasplitter::io::read_fasta;
 
 #[derive(Parser)]
 #[command(name = "motif_graph", about = "Scan alpha arrays for anchor motifs, build transition graph")]
@@ -367,51 +369,15 @@ fn hamming_bytes(a: &[u8], b: &[u8]) -> u32 {
 // ============ FASTA READING ============
 
 fn read_alpha_arrays(path: &str) -> Vec<(String, Vec<u8>)> {
-    use std::io::{BufRead, BufReader};
-    let file = std::fs::File::open(path).unwrap_or_else(|e| panic!("Cannot open {}: {}", path, e));
-    let reader = BufReader::with_capacity(64 * 1024 * 1024, file);
-
-    let mut arrays: Vec<(String, Vec<u8>)> = Vec::new();
-    let mut current_name = String::new();
-    let mut current_seq: Vec<u8> = Vec::new();
-    let mut is_alpha = false;
-
-    for line in reader.lines() {
-        let line = line.unwrap();
-        if line.starts_with('>') {
-            // Save previous
-            if is_alpha && !current_seq.is_empty() {
-                arrays.push((current_name.clone(), current_seq.clone()));
-            }
-            current_name = line[1..].trim().to_string();
-            current_seq.clear();
-
-            // Check if alpha satellite (period 171 or 172)
-            let fields: Vec<&str> = current_name.split('_').collect();
-            if let Some(period_str) = fields.last() {
-                let period: u32 = period_str.parse().unwrap_or(0);
-                is_alpha = period == 171 || period == 172;
-            } else {
-                is_alpha = false;
-            }
-        } else if is_alpha {
-            current_seq.extend(line.trim().as_bytes());
-        }
-    }
-    // Last entry
-    if is_alpha && !current_seq.is_empty() {
-        arrays.push((current_name, current_seq));
-    }
-
-    arrays
-}
-
-fn revcomp(seq: &[u8]) -> Vec<u8> {
-    seq.iter().rev().map(|&b| match b {
-        b'A' | b'a' => b'T',
-        b'T' | b't' => b'A',
-        b'C' | b'c' => b'G',
-        b'G' | b'g' => b'C',
-        other => other,
-    }).collect()
+    read_fasta(path)
+        .into_iter()
+        .filter(|(name, _)| {
+            let fields: Vec<&str> = name.split('_').collect();
+            fields
+                .last()
+                .and_then(|s| s.parse::<u32>().ok())
+                .map(|p| p == 171 || p == 172)
+                .unwrap_or(false)
+        })
+        .collect()
 }

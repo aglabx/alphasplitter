@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use clap::Parser;
 use rayon::prelude::*;
 use serde::Serialize;
+use alphasplitter::io::read_fasta;
 
 #[derive(Parser)]
 #[command(name = "find_phase", about = "Find optimal monomer phase by entropy minimization + CENP-B box stability")]
@@ -67,7 +68,7 @@ fn main() {
 
     // Read arrays
     eprintln!("Reading {}...", args.input);
-    let all_arrays = read_all_arrays(&args.input);
+    let all_arrays = read_fasta(&args.input);
     eprintln!("  {} total arrays", all_arrays.len());
 
     // Filter: period-matched, large enough
@@ -245,27 +246,3 @@ fn main() {
     eprintln!("\nWritten to {}", args.output);
 }
 
-fn read_all_arrays(path: &str) -> Vec<(String, Vec<u8>)> {
-    use std::io::{BufRead, BufReader};
-    let file = std::fs::File::open(path).unwrap();
-    let reader = BufReader::with_capacity(64 * 1024 * 1024, file);
-    let mut arrays = Vec::new();
-    let mut name = String::new();
-    let mut seq: Vec<u8> = Vec::new();
-    for line in reader.lines() {
-        let line = line.unwrap();
-        if line.starts_with('>') {
-            if !name.is_empty() && !seq.is_empty() {
-                arrays.push((name.clone(), seq.clone()));
-            }
-            name = line[1..].trim().to_string();
-            seq.clear();
-        } else {
-            seq.extend(line.trim().as_bytes());
-        }
-    }
-    if !name.is_empty() && !seq.is_empty() {
-        arrays.push((name, seq));
-    }
-    arrays
-}

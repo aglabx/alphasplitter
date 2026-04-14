@@ -2,6 +2,7 @@ use std::io::{BufRead, BufReader, Write, Read as IoRead};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use alphasplitter::monomer::{hpc, revcomp};
 
 /// Pass 1: Extract reads containing satellite DNA by chain grammar check.
 /// Not just motif presence — checks ORDER and DISTANCES between motifs.
@@ -216,22 +217,6 @@ fn check_chain_grammar(
     }
 
     consistent_pairs
-}
-
-fn hpc(seq: &[u8]) -> Vec<u8> {
-    let mut result = Vec::with_capacity(seq.len());
-    for &b in seq {
-        if result.last().copied() != Some(b) {
-            result.push(b);
-        }
-    }
-    result
-}
-
-fn revcomp(seq: &[u8]) -> Vec<u8> {
-    seq.iter().rev().map(|&b| match b {
-        b'A' => b'T', b'T' => b'A', b'C' => b'G', b'G' => b'C', _ => b'N',
-    }).collect()
 }
 
 fn which_exists(cmd: &str) -> bool {

@@ -1,4 +1,5 @@
 use std::io::{BufRead, BufReader, Write};
+use alphasplitter::monomer::hpc;
 
 /// Pass 2: Convert satellite reads to alphabet notation.
 /// Input: FASTA of satellite reads (from reads_extract).
@@ -151,16 +152,6 @@ fn process_read(
     if *total_reads % 10000 == 0 {
         eprintln!("\r  {} reads, {} monomers", total_reads, total_monomers);
     }
-}
-
-fn hpc(seq: &[u8]) -> Vec<u8> {
-    let mut result = Vec::with_capacity(seq.len());
-    for &b in seq {
-        if result.last().copied() != Some(b) {
-            result.push(b);
-        }
-    }
-    result
 }
 
 fn load_chain_sites(path: &str) -> Vec<Vec<u8>> {

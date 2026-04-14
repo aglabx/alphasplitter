@@ -2,6 +2,8 @@ use std::collections::HashMap;
 use clap::Parser;
 use rayon::prelude::*;
 use serde::Serialize;
+use alphasplitter::monomer::kmer_hash;
+use alphasplitter::io::read_fasta;
 
 #[derive(Parser)]
 #[command(name = "discover_chains", about = "Chain-first discovery: find periodic anchor chains in satellite arrays")]
@@ -151,7 +153,7 @@ fn main() {
 
     // --- Read arrays ---
     eprintln!("Reading {}...", args.input);
-    let all_arrays = read_all_arrays(&args.input);
+    let all_arrays = read_fasta(&args.input);
     eprintln!("  {} total arrays", all_arrays.len());
 
     // --- Detect periods ---
@@ -255,7 +257,7 @@ fn main() {
     let per_array_kmers: Vec<HashMap<u64, Vec<usize>>> = working_arrays.par_iter().map(|(_, seq)| {
         let mut kmer_positions: HashMap<u64, Vec<usize>> = HashMap::new();
         for i in 0..seq.len().saturating_sub(k - 1) {
-            if let Some(hash) = kmer_hash(&seq[i..i + k]) {
+            if let Some(hash) = kmer_hash(&seq[i..i + k], k) {
                 kmer_positions.entry(hash).or_default().push(i);
             }
         }
@@ -990,7 +992,7 @@ fn discover_links(
     let array_site_positions: Vec<Vec<Vec<usize>>> = arrays.par_iter().map(|(_, seq)| {
         let mut positions = vec![Vec::new(); n_sites];
         for i in 0..seq.len().saturating_sub(k - 1) {
-            if let Some(hash) = kmer_hash(&seq[i..i + k]) {
+            if let Some(hash) = kmer_hash(&seq[i..i + k], k) {
                 for (si, &sh) in site_hashes.iter().enumerate() {
                     if si >= n_sites { break; }
                     if hash == sh {
@@ -1150,23 +1152,6 @@ fn cluster_sites(mut sites: Vec<Site>, k: usize, p: usize) -> Vec<Site> {
     merged
 }
 
-// ============ K-MER UTILS ============
-
-fn kmer_hash(seq: &[u8]) -> Option<u64> {
-    let mut hash: u64 = 0;
-    for &b in seq {
-        let enc = match b {
-            b'A' | b'a' => 0u64,
-            b'C' | b'c' => 1,
-            b'G' | b'g' => 2,
-            b'T' | b't' => 3,
-            _ => return None,
-        };
-        hash = (hash << 2) | enc;
-    }
-    Some(hash)
-}
-
 fn decode_kmer_sequences(arrays: &[(String, Vec<u8>)], k: usize, hashes: &[u64]) -> HashMap<u64, String> {
     let hash_set: std::collections::HashSet<u64> = hashes.iter().copied().collect();
     let mut result: HashMap<u64, String> = HashMap::new();
@@ -1174,7 +1159,7 @@ fn decode_kmer_sequences(arrays: &[(String, Vec<u8>)], k: usize, hashes: &[u64])
     // Just scan first array until we find all
     for (_, seq) in arrays {
         for i in 0..seq.len().saturating_sub(k - 1) {
-            if let Some(hash) = kmer_hash(&seq[i..i + k]) {
+            if let Some(hash) = kmer_hash(&seq[i..i + k], k) {
                 if hash_set.contains(&hash) && !result.contains_key(&hash) {
                     result.insert(hash, String::from_utf8_lossy(&seq[i..i + k]).to_string());
                 }
@@ -1185,30 +1170,3 @@ fn decode_kmer_sequences(arrays: &[(String, Vec<u8>)], k: usize, hashes: &[u64])
     result
 }
 
-// ============ FASTA ============
-
-fn read_all_arrays(path: &str) -> Vec<(String, Vec<u8>)> {
-    use std::io::{BufRead, BufReader};
-    let file = std::fs::File::open(path).unwrap();
-    let reader = BufReader::with_capacity(64 * 1024 * 1024, file);
-    let mut arrays = Vec::new();
-    let mut name = String::new();
-    let mut seq: Vec<u8> = Vec::new();
-
-    for line in reader.lines() {
-        let line = line.unwrap();
-        if line.starts_with('>') {
-            if !name.is_empty() && !seq.is_empty() {
-                arrays.push((name.clone(), seq.clone()));
-            }
-            name = line[1..].trim().to_string();
-            seq.clear();
-        } else {
-            seq.extend(line.trim().as_bytes());
-        }
-    }
-    if !name.is_empty() && !seq.is_empty() {
-        arrays.push((name, seq));
-    }
-    arrays
-}

@@ -2,6 +2,8 @@ use std::collections::HashMap;
 use clap::Parser;
 use rayon::prelude::*;
 use serde::Serialize;
+use alphasplitter::monomer::revcomp;
+use alphasplitter::io::read_fasta;
 
 #[derive(Parser)]
 #[command(name = "discover_motifs", about = "Ab initio motif discovery from satellite arrays: find conserved k-mers with periodic spacing")]
@@ -105,7 +107,7 @@ fn main() {
 
     // --- Read arrays ---
     eprintln!("Reading {}...", args.input);
-    let all_arrays = read_all_arrays(&args.input);
+    let all_arrays = read_fasta(&args.input);
     eprintln!("  {} total arrays", all_arrays.len());
 
     // --- Detect or use target period ---
@@ -489,35 +491,3 @@ fn hamming(a: &[u8], b: &[u8]) -> u32 {
     a.iter().zip(b.iter()).filter(|(x, y)| x.to_ascii_uppercase() != y.to_ascii_uppercase()).count() as u32
 }
 
-fn revcomp(seq: &[u8]) -> Vec<u8> {
-    seq.iter().rev().map(|&b| match b {
-        b'A' | b'a' => b'T', b'T' | b't' => b'A',
-        b'C' | b'c' => b'G', b'G' | b'g' => b'C', o => o,
-    }).collect()
-}
-
-fn read_all_arrays(path: &str) -> Vec<(String, Vec<u8>)> {
-    use std::io::{BufRead, BufReader};
-    let file = std::fs::File::open(path).unwrap();
-    let reader = BufReader::with_capacity(64 * 1024 * 1024, file);
-    let mut arrays = Vec::new();
-    let mut name = String::new();
-    let mut seq: Vec<u8> = Vec::new();
-
-    for line in reader.lines() {
-        let line = line.unwrap();
-        if line.starts_with('>') {
-            if !name.is_empty() && !seq.is_empty() {
-                arrays.push((name.clone(), seq.clone()));
-            }
-            name = line[1..].trim().to_string();
-            seq.clear();
-        } else {
-            seq.extend(line.trim().as_bytes());
-        }
-    }
-    if !name.is_empty() && !seq.is_empty() {
-        arrays.push((name, seq));
-    }
-    arrays
-}

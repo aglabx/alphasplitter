@@ -2,6 +2,8 @@ use std::collections::HashMap;
 use clap::Parser;
 use rayon::prelude::*;
 use serde::{Serialize, Deserialize};
+use alphasplitter::monomer::revcomp;
+use alphasplitter::io::read_fasta;
 
 #[derive(Parser)]
 #[command(name = "motif_cut", about = "Cut arrays into monomers at motif boundaries, classify by motif fingerprint + linker lengths")]
@@ -187,7 +189,7 @@ fn main() {
 
     // --- Read ALL arrays ---
     eprintln!("Reading {}...", args.input);
-    let all_arrays = read_all_arrays(&args.input);
+    let all_arrays = read_fasta(&args.input);
     eprintln!("  {} total arrays in fasta", all_arrays.len());
 
     // --- Scan motifs on ALL arrays, filter by min_motifs ---
@@ -744,34 +746,6 @@ fn hamming_bytes(a: &[u8], b: &[u8]) -> u32 {
     a.iter().zip(b.iter()).filter(|(x, y)| x.to_ascii_uppercase() != y.to_ascii_uppercase()).count() as u32
 }
 
-// ============ FASTA / UTILS ============
-
-fn read_all_arrays(path: &str) -> Vec<(String, Vec<u8>)> {
-    use std::io::{BufRead, BufReader};
-    let file = std::fs::File::open(path).unwrap();
-    let reader = BufReader::with_capacity(64 * 1024 * 1024, file);
-    let mut arrays = Vec::new();
-    let mut name = String::new();
-    let mut seq: Vec<u8> = Vec::new();
-
-    for line in reader.lines() {
-        let line = line.unwrap();
-        if line.starts_with('>') {
-            if !name.is_empty() && !seq.is_empty() {
-                arrays.push((name.clone(), seq.clone()));
-            }
-            name = line[1..].trim().to_string();
-            seq.clear();
-        } else {
-            seq.extend(line.trim().as_bytes());
-        }
-    }
-    if !name.is_empty() && !seq.is_empty() {
-        arrays.push((name, seq));
-    }
-    arrays
-}
-
 /// Simple NW alignment of reference motif to extracted region, returns CIGAR string
 fn align_and_cigar(reference: &[u8], query: &[u8]) -> (String, String) {
     let n = reference.len();
@@ -884,13 +858,6 @@ fn align_and_cigar(reference: &[u8], query: &[u8]) -> (String, String) {
 
     let aligned_str = String::from_utf8_lossy(&aligned_query).to_string();
     (final_cigar, aligned_str)
-}
-
-fn revcomp(seq: &[u8]) -> Vec<u8> {
-    seq.iter().rev().map(|&b| match b {
-        b'A' | b'a' => b'T', b'T' | b't' => b'A',
-        b'C' | b'c' => b'G', b'G' | b'g' => b'C', o => o,
-    }).collect()
 }
 
 fn build_consensus(seqs: &[&[u8]], len: usize) -> String {

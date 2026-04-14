@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
+use alphasplitter::monomer::hpc;
 
 /// Step 1: Extract HPC monomers per letter from CHM13 annotated TSV.
 /// Outputs one FASTA per letter (top N letters by count).
@@ -65,7 +66,7 @@ fn main() {
         let entry = per_letter.entry(letter.to_string()).or_default();
         if entry.len() >= max_per_letter { continue; }
 
-        let hpc_seq = hpc(seq.as_bytes());
+        let hpc_seq = hpc(&seq.bytes().map(|b| b.to_ascii_uppercase()).collect::<Vec<u8>>());
         let name = if fields.len() >= 3 {
             format!("{}_{}", fields[0], fields[1]) // chr_start
         } else {
@@ -112,13 +113,3 @@ fn main() {
     eprintln!("Run: bash {}", script_path);
 }
 
-fn hpc(seq: &[u8]) -> Vec<u8> {
-    let mut r = Vec::with_capacity(seq.len());
-    for &b in seq {
-        let bu = b.to_ascii_uppercase();
-        if r.last().copied() != Some(bu) {
-            r.push(bu);
-        }
-    }
-    r
-}

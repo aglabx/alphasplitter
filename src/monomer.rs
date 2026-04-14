@@ -41,6 +41,17 @@ pub fn revcomp_str(seq: &str) -> String {
     String::from_utf8(revcomp(seq.as_bytes())).unwrap()
 }
 
+/// Homopolymer compression: collapse consecutive runs of the same base.
+pub fn hpc(seq: &[u8]) -> Vec<u8> {
+    let mut result = Vec::with_capacity(seq.len());
+    for &b in seq {
+        if result.last().copied() != Some(b) {
+            result.push(b);
+        }
+    }
+    result
+}
+
 /// Encode nucleotide to 0-3 (A=0, C=1, G=2, T=3), N=255
 pub fn encode_base(b: u8) -> u8 {
     match b {

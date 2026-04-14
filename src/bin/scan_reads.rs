@@ -3,6 +3,7 @@ use std::io::{BufRead, BufReader, Read as IoRead};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::process::{Command, Stdio};
+use alphasplitter::monomer::revcomp;
 
 /// Streaming CENP-B/box scanner for FASTQ/FASTA (plain or gzipped).
 /// Reads one record at a time via streaming, never loads all into memory.
@@ -211,13 +212,6 @@ fn main() {
         let pct = cnt as f64 / total_cenpb as f64 * 100.0;
         println!("{}\t{}\t{:.4}\t{:.2}%", name, cnt, per_mb, pct);
     }
-}
-
-fn revcomp(seq: &[u8]) -> Vec<u8> {
-    seq.iter().rev().map(|&b| match b {
-        b'A' | b'a' => b'T', b'T' | b't' => b'A',
-        b'C' | b'c' => b'G', b'G' | b'g' => b'C', _ => b'N',
-    }).collect()
 }
 
 fn which_exists(cmd: &str) -> bool {

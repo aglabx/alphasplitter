@@ -1,7 +1,8 @@
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use alphasplitter::monomer::revcomp;
+use alphasplitter::io::read_fasta_strings;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -21,7 +22,7 @@ fn main() {
         (12, b'C'), (13, b'G'), (14, b'G'), (15, b'G'),
     ];
 
-    let arrays = Arc::new(read_fasta(input));
+    let arrays = Arc::new(read_fasta_strings(input));
     let total_bp: usize = arrays.iter().map(|(_, s)| s.len()).sum();
     eprintln!("{} arrays, {:.1}Mb", arrays.len(), total_bp as f64 / 1e6);
 
@@ -124,33 +125,3 @@ fn main() {
     }
 }
 
-fn revcomp(seq: &[u8]) -> Vec<u8> {
-    seq.iter().rev().map(|&b| match b {
-        b'A' | b'a' => b'T', b'T' | b't' => b'A',
-        b'C' | b'c' => b'G', b'G' | b'g' => b'C', o => o,
-    }).collect()
-}
-
-fn read_fasta(path: &str) -> Vec<(String, String)> {
-    let file = std::fs::File::open(path).unwrap();
-    let reader = BufReader::with_capacity(64 * 1024 * 1024, file);
-    let mut arrays = Vec::new();
-    let mut name = String::new();
-    let mut seq = String::new();
-    for line in reader.lines() {
-        let line = line.unwrap();
-        if line.starts_with('>') {
-            if !name.is_empty() && !seq.is_empty() {
-                arrays.push((name.clone(), seq.clone().to_uppercase()));
-            }
-            name = line[1..].trim().to_string();
-            seq.clear();
-        } else {
-            seq.push_str(line.trim());
-        }
-    }
-    if !name.is_empty() && !seq.is_empty() {
-        arrays.push((name, seq.to_uppercase()));
-    }
-    arrays
-}

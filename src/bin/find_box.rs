@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use clap::Parser;
 use rayon::prelude::*;
+use alphasplitter::monomer::revcomp_str as revcomp;
+use alphasplitter::io::read_fasta_strings;
 
 #[derive(Parser)]
 #[command(name = "find_box", about = "Search for TIGD4/CENP-B box pattern in satellite arrays")]
@@ -30,7 +32,7 @@ fn main() {
     eprintln!("Pattern: {} ({}bp, {} fixed positions)", args.pattern, plen, n_fixed);
 
     // Read ALL arrays
-    let arrays = read_all_arrays(&args.input);
+    let arrays = read_fasta_strings(&args.input);
     let total_bp: usize = arrays.iter().map(|(_, s)| s.len()).sum();
     eprintln!("{} arrays, {:.1}Mb", arrays.len(), total_bp as f64 / 1e6);
 
@@ -101,34 +103,3 @@ fn main() {
     eprintln!("\nStrand: fwd={} rc={}", fwd_hits, rc_hits);
 }
 
-fn revcomp(seq: &str) -> String {
-    seq.bytes().rev().map(|b| match b {
-        b'A' | b'a' => b'T', b'T' | b't' => b'A',
-        b'C' | b'c' => b'G', b'G' | b'g' => b'C', o => o,
-    } as char).collect()
-}
-
-fn read_all_arrays(path: &str) -> Vec<(String, String)> {
-    use std::io::{BufRead, BufReader};
-    let file = std::fs::File::open(path).unwrap();
-    let reader = BufReader::with_capacity(64 * 1024 * 1024, file);
-    let mut arrays = Vec::new();
-    let mut name = String::new();
-    let mut seq = String::new();
-    for line in reader.lines() {
-        let line = line.unwrap();
-        if line.starts_with('>') {
-            if !name.is_empty() && !seq.is_empty() {
-                arrays.push((name.clone(), seq.clone()));
-            }
-            name = line[1..].trim().to_string();
-            seq.clear();
-        } else {
-            seq.push_str(line.trim());
-        }
-    }
-    if !name.is_empty() && !seq.is_empty() {
-        arrays.push((name, seq));
-    }
-    arrays
-}

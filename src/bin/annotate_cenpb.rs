@@ -1,4 +1,5 @@
 use std::io::{BufRead, BufReader, Write};
+use alphasplitter::monomer::revcomp;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -101,9 +102,3 @@ fn main() {
     }
 }
 
-fn revcomp(seq: &[u8]) -> Vec<u8> {
-    seq.iter().rev().map(|&b| match b {
-        b'A' | b'a' => b'T', b'T' | b't' => b'A',
-        b'C' | b'c' => b'G', b'G' | b'g' => b'C', o => o,
-    }).collect()
-}

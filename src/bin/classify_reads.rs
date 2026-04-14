@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use alphasplitter::monomer::hpc;
 
 /// Classify ONT/HiFi reads using existing CHM13 alphabet in HPC space.
 ///
@@ -322,14 +323,6 @@ fn find_closest_letter<'a>(presence: &str, _dists: &[usize], alphabet: &'a HashM
         }
     }
     best_letter
-}
-
-fn hpc(seq: &[u8]) -> Vec<u8> {
-    let mut r = Vec::with_capacity(seq.len());
-    for &b in seq {
-        if r.last().copied() != Some(b) { r.push(b); }
-    }
-    r
 }
 
 fn orig_to_hpc_pos(orig: &[u8], orig_pos: usize) -> usize {
