@@ -1,7 +1,8 @@
 .PHONY: all build release debug check test clean fmt install help
 
-BINDIR := target/release
-INPUT  ?= input.10kb.fasta
+BIN     := target/release/alphasplitter
+INPUT   ?= input.10kb.fasta
+OUTDIR  ?= .
 THREADS ?= 8
 
 all: release
@@ -30,21 +31,20 @@ install: release
 	cargo install --path . --force
 
 # End-to-end pipeline: discover → cut → annotate.
-# Usage: make run INPUT=path/to/arrays.10kb.fasta THREADS=96
+# Usage: make run INPUT=path/to/arrays.10kb.fasta OUTDIR=out THREADS=96
 run: release
-	$(BINDIR)/discover_chains $(INPUT) -o chains.json -t $(THREADS)
-	$(BINDIR)/motif_cut $(INPUT) -m chains.json -o monomers.tsv -t $(THREADS)
-	$(BINDIR)/annotate_cenpb monomers.tsv annotated.tsv
+	$(BIN) run $(INPUT) -o $(OUTDIR) -t $(THREADS)
 
 help:
 	@echo "AlphaSplitter — make targets"
-	@echo "  make             build release binaries (default)"
-	@echo "  make debug       build debug binaries"
-	@echo "  make check       cargo check"
-	@echo "  make test        run tests"
-	@echo "  make fmt         cargo fmt"
-	@echo "  make clean       cargo clean"
-	@echo "  make install     cargo install --path ."
-	@echo "  make run INPUT=arrays.10kb.fasta THREADS=96"
+	@echo "  make                       build release binary (default)"
+	@echo "  make debug                 build debug binary"
+	@echo "  make check                 cargo check"
+	@echo "  make test                  run tests"
+	@echo "  make fmt                   cargo fmt"
+	@echo "  make clean                 cargo clean"
+	@echo "  make install               cargo install --path ."
+	@echo "  make run INPUT=... OUTDIR=... THREADS=..."
 	@echo ""
-	@echo "Binaries land in $(BINDIR)/ — e.g. $(BINDIR)/discover_chains --help"
+	@echo "Binary: $(BIN)"
+	@echo "CLI:    $(BIN) --help"

@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use clap::Parser;
 use rayon::prelude::*;
-use alphasplitter::monomer::revcomp_str as revcomp;
-use alphasplitter::io::read_fasta_strings;
+use crate::monomer::revcomp_str as revcomp;
+use crate::io::read_fasta_strings;
 
 #[derive(Parser)]
 #[command(name = "find_box", about = "Search for TIGD4/CENP-B box pattern in satellite arrays")]
@@ -16,10 +16,10 @@ struct Args {
     threads: usize,
 }
 
-fn main() {
-    let args = Args::parse();
+pub fn run_from_args(argv: Vec<String>) {
+    let args = Args::parse_from(&argv);
     if args.threads > 0 {
-        rayon::ThreadPoolBuilder::new().num_threads(args.threads).build_global().unwrap();
+        rayon::ThreadPoolBuilder::new().num_threads(args.threads).build_global().ok();
     }
 
     // Parse pattern: uppercase = fixed, N = variable

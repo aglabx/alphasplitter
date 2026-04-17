@@ -2,7 +2,7 @@ use std::io::{BufRead, BufReader, Write, Read as IoRead};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use alphasplitter::monomer::{hpc, revcomp};
+use crate::monomer::{hpc, revcomp};
 
 /// Pass 1: Extract reads containing satellite DNA by chain grammar check.
 /// Not just motif presence — checks ORDER and DISTANCES between motifs.
@@ -10,8 +10,7 @@ use alphasplitter::monomer::{hpc, revcomp};
 ///
 /// Usage: reads_extract <input.fastq.gz> <chains.json> [min_chain_hits=3]
 
-fn main() {
-    let args: Vec<String> = std::env::args().collect();
+pub fn run_from_args(args: Vec<String>) {
     if args.len() < 3 {
         eprintln!("Usage: reads_extract <input.fastq.gz> <chains.json> [min_chain_hits=3]");
         std::process::exit(1);

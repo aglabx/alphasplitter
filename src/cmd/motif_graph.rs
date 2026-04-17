@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use clap::Parser;
 use rayon::prelude::*;
 use serde::Serialize;
-use alphasplitter::monomer::revcomp;
-use alphasplitter::io::read_fasta;
+use crate::monomer::revcomp;
+use crate::io::read_fasta;
 
 #[derive(Parser)]
 #[command(name = "motif_graph", about = "Scan alpha arrays for anchor motifs, build transition graph")]
@@ -93,14 +93,14 @@ struct CanonicalPair {
     length_distribution: Vec<(i32, u64)>,
 }
 
-fn main() {
-    let args = Args::parse();
+pub fn run_from_args(argv: Vec<String>) {
+    let args = Args::parse_from(&argv);
 
     if args.threads > 0 {
         rayon::ThreadPoolBuilder::new()
             .num_threads(args.threads)
             .build_global()
-            .unwrap();
+            .ok();
     }
 
     // Build motif sequences and their reverse complements

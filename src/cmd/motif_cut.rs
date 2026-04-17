@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use clap::Parser;
 use rayon::prelude::*;
 use serde::{Serialize, Deserialize};
-use alphasplitter::monomer::revcomp;
-use alphasplitter::io::read_fasta;
+use crate::monomer::revcomp;
+use crate::io::read_fasta;
 
 #[derive(Parser)]
 #[command(name = "motif_cut", about = "Cut arrays into monomers at motif boundaries, classify by motif fingerprint + linker lengths")]
@@ -169,14 +169,14 @@ struct CutReport {
     letters: Vec<Letter>,
 }
 
-fn main() {
-    let args = Args::parse();
+pub fn run_from_args(argv: Vec<String>) {
+    let args = Args::parse_from(&argv);
 
     if args.threads > 0 {
         rayon::ThreadPoolBuilder::new()
             .num_threads(args.threads)
             .build_global()
-            .unwrap();
+            .ok();
     }
 
     let anchors = load_anchors(args.motifs.as_deref());

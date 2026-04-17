@@ -3,7 +3,7 @@ use std::io::{BufRead, BufReader, Read as IoRead};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::process::{Command, Stdio};
-use alphasplitter::monomer::revcomp;
+use crate::monomer::revcomp;
 
 /// Streaming CENP-B/box scanner for FASTQ/FASTA (plain or gzipped).
 /// Reads one record at a time via streaming, never loads all into memory.
@@ -11,8 +11,7 @@ use alphasplitter::monomer::revcomp;
 ///
 /// Usage: scan_reads <input.fastq.gz|.fasta|.fastq> [threads] [--pattern NAME:PATTERN ...]
 
-fn main() {
-    let args: Vec<String> = std::env::args().collect();
+pub fn run_from_args(args: Vec<String>) {
     if args.len() < 2 {
         eprintln!("Usage: scan_reads <input.fastq.gz|.fasta|.fastq> [threads] [--pattern NAME:PATTERN ...]");
         std::process::exit(1);

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use clap::Parser;
 use rayon::prelude::*;
 use serde::Serialize;
-use alphasplitter::io::read_fasta;
+use crate::io::read_fasta;
 
 #[derive(Parser)]
 #[command(name = "find_phase", about = "Find optimal monomer phase by entropy minimization + CENP-B box stability")]
@@ -54,14 +54,14 @@ struct PhaseScore {
     total_score: f64,
 }
 
-fn main() {
-    let args = Args::parse();
+pub fn run_from_args(argv: Vec<String>) {
+    let args = Args::parse_from(&argv);
 
     if args.threads > 0 {
         rayon::ThreadPoolBuilder::new()
             .num_threads(args.threads)
             .build_global()
-            .unwrap();
+            .ok();
     }
 
     let p = args.period;

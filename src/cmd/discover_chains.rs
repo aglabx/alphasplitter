@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use clap::Parser;
 use rayon::prelude::*;
 use serde::Serialize;
-use alphasplitter::monomer::kmer_hash;
-use alphasplitter::io::read_fasta;
+use crate::monomer::kmer_hash;
+use crate::io::read_fasta;
 
 #[derive(Parser)]
 #[command(name = "discover_chains", about = "Chain-first discovery: find periodic anchor chains in satellite arrays")]
@@ -141,14 +141,14 @@ struct ArraySignature {
     chain_compatible: bool,
 }
 
-fn main() {
-    let args = Args::parse();
+pub fn run_from_args(argv: Vec<String>) {
+    let args = Args::parse_from(&argv);
 
     if args.threads > 0 {
         rayon::ThreadPoolBuilder::new()
             .num_threads(args.threads)
             .build_global()
-            .unwrap();
+            .ok();
     }
 
     // --- Read arrays ---

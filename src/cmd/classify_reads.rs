@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use alphasplitter::monomer::hpc;
+use crate::monomer::hpc;
 
 /// Classify ONT/HiFi reads using existing CHM13 alphabet in HPC space.
 ///
@@ -13,8 +13,7 @@ use alphasplitter::monomer::hpc;
 ///
 /// Usage: classify_reads <reads.fasta> <chains.json> <alphabet.json> [threads]
 
-fn main() {
-    let args: Vec<String> = std::env::args().collect();
+pub fn run_from_args(args: Vec<String>) {
     if args.len() < 4 {
         eprintln!("Usage: classify_reads <reads.fasta> <chains.json> <alphabet.json> [threads]");
         std::process::exit(1);

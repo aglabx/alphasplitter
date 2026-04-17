@@ -1,8 +1,7 @@
 use std::io::{BufRead, BufReader, Write};
-use alphasplitter::monomer::revcomp;
+use crate::monomer::revcomp;
 
-fn main() {
-    let args: Vec<String> = std::env::args().collect();
+pub fn run_from_args(args: Vec<String>) {
     if args.len() < 3 {
         eprintln!("Usage: annotate_cenpb <monomers.tsv> <output.tsv>");
         std::process::exit(1);

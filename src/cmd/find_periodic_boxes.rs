@@ -1,10 +1,9 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use alphasplitter::io::read_fasta_strings;
+use crate::io::read_fasta_strings;
 
-fn main() {
-    let args: Vec<String> = std::env::args().collect();
+pub fn run_from_args(args: Vec<String>) {
     if args.len() < 2 {
         eprintln!("Usage: find_periodic_boxes <input.fasta> [threads]");
         std::process::exit(1);

@@ -1,5 +1,5 @@
 use std::io::{BufRead, BufReader, Write};
-use alphasplitter::monomer::hpc;
+use crate::monomer::hpc;
 
 /// Pass 2: Convert satellite reads to alphabet notation.
 /// Input: FASTA of satellite reads (from reads_extract).
@@ -11,8 +11,7 @@ use alphasplitter::monomer::hpc;
 ///
 /// Usage: reads_alphabet <satellite_reads.fasta> <chains.json>
 
-fn main() {
-    let args: Vec<String> = std::env::args().collect();
+pub fn run_from_args(args: Vec<String>) {
     if args.len() < 3 {
         eprintln!("Usage: reads_alphabet <satellite_reads.fasta> <chains.json>");
         std::process::exit(1);

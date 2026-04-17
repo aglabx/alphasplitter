@@ -1,14 +1,13 @@
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
-use alphasplitter::monomer::hpc;
+use crate::monomer::hpc;
 
 /// Step 1: Extract HPC monomers per letter from CHM13 annotated TSV.
 /// Outputs one FASTA per letter (top N letters by count).
 ///
 /// Usage: build_hpc_hmms <annotated.tsv> <outdir> [max_letters=30] [max_per_letter=200]
 
-fn main() {
-    let args: Vec<String> = std::env::args().collect();
+pub fn run_from_args(args: Vec<String>) {
     if args.len() < 3 {
         eprintln!("Usage: build_hpc_hmms <annotated.tsv> <outdir> [max_letters=30] [max_per_letter=200]");
         std::process::exit(1);

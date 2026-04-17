@@ -2,26 +2,37 @@
 
 ## What is this
 
-Ab initio satellite DNA monomer alphabet discovery tool. Rust, CLI.
+Ab initio satellite DNA monomer alphabet discovery tool. Rust, single CLI.
 
 ## Build & Run
 
 ```bash
 cargo build --release
-./target/release/discover_chains input.fasta -o chains.json -t 96
-./target/release/motif_cut input.fasta -m chains.json -o monomers.tsv -t 96
-./target/release/annotate_cenpb monomers.tsv annotated.tsv
+
+# End-to-end: discover → cut → annotate
+./target/release/alphasplitter run input.fasta -o out/ -t 96
+
+# Or stage-by-stage
+./target/release/alphasplitter discover input.fasta -o chains.json -t 96
+./target/release/alphasplitter cut      input.fasta -m chains.json -o monomers.tsv -t 96
+./target/release/alphasplitter annotate monomers.tsv annotated.tsv
 ```
+
+See `alphasplitter --help` for the full list of subcommands.
 
 ## Architecture
 
-- `src/lib.rs` — shared modules (io, kmer, monomer)
-- `src/bin/discover_chains.rs` — main chain discovery pipeline
-- `src/bin/motif_cut.rs` — monomer cutting + classification
-- `src/bin/annotate_cenpb.rs` — CENP-B box annotation
-- `src/bin/find_box.rs` — generic box pattern search
-- `src/bin/cenpb_spacing.rs` — spacing analysis
-- `src/bin/find_periodic_boxes.rs` — de novo periodic box discovery
+- `src/lib.rs` — shared modules (io, kmer, monomer, cmd)
+- `src/main.rs` — CLI dispatcher (clap)
+- `src/cmd/discover_chains.rs` — `discover`: chain discovery pipeline
+- `src/cmd/motif_cut.rs` — `cut`: monomer cutting + classification
+- `src/cmd/annotate_cenpb.rs` — `annotate`: CENP-B box annotation
+- `src/cmd/find_box.rs` — `find-box`: generic box pattern search
+- `src/cmd/cenpb_spacing.rs` — `spacing`: CENP-B spacing analysis
+- `src/cmd/find_periodic_boxes.rs` — `find-periodic-boxes`: de novo box discovery
+- `src/cmd/{build_hpc_hmms,scan_reads,classify_reads,reads_extract,reads_alphabet}.rs`
+  — `reads {build-hmms,scan,classify,extract,alphabet}`: ONT HPC-HMM pipeline
+- `src/cmd/{find_phase,motif_graph}.rs` — hidden `dev {find-phase,motif-graph}` (research)
 
 ## Key Design Decisions
 
