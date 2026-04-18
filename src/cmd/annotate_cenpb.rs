@@ -19,11 +19,27 @@ pub fn run_from_args(args: Vec<String>) {
     let reader = BufReader::new(file);
     let mut out = std::io::BufWriter::new(std::fs::File::create(&args[2]).unwrap());
 
-    for (lineno, line) in reader.lines().enumerate() {
+    // State machine:
+    //   - pass through `#` manifest lines verbatim,
+    //   - on the first non-`#` line (the column header), emit our own `#` block
+    //     and extend the header with CENP-B columns,
+    //   - annotate every subsequent data row.
+    let mut header_done = false;
+    let cenpb_cols = "cenpb\tcenpb_score\tcenpb_pos\tcenpb_strand\tcenpb_cigar9\tcenpb_cigar17\tcenpb_seq";
+
+    for line in reader.lines() {
         let line = line.unwrap();
-        if lineno == 0 {
-            // Header
-            writeln!(out, "{}\tcenpb\tcenpb_score\tcenpb_pos\tcenpb_strand\tcenpb_cigar9\tcenpb_cigar17\tcenpb_seq", line).unwrap();
+        if line.starts_with('#') {
+            writeln!(out, "{}", line).unwrap();
+            continue;
+        }
+        if !header_done {
+            writeln!(out, "#alphasplitter v{} / annotate", env!("CARGO_PKG_VERSION")).unwrap();
+            writeln!(out, "#CENP-B_box_ref: nTTCGnnnnAnnCGGGn (17bp, searched on BOTH strands)").unwrap();
+            writeln!(out, "#cenpb_labels: B+ (score>=7), B? (score=6), B- (score<=5)").unwrap();
+            writeln!(out, "#columns_added: {}", cenpb_cols.replace('\t', " ")).unwrap();
+            writeln!(out, "{}\t{}", line, cenpb_cols).unwrap();
+            header_done = true;
             continue;
         }
 

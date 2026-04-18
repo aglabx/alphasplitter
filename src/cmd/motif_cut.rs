@@ -356,11 +356,22 @@ pub fn run_from_args(argv: Vec<String>) {
     // --- Write outputs ---
     eprintln!("\nWriting outputs...");
 
-    // Monomers TSV
+    // Monomers TSV — with a self-describing manifest header.
+    // Contract: every row is one monomer on one array; `strand` is + for
+    // arrays kept as input and - for arrays where motif_cut revcomped them
+    // during normalization. `array_id` is the original FASTA name (no _rc).
     {
         use std::io::Write;
         let mut f = std::io::BufWriter::new(std::fs::File::create(&args.output).unwrap());
-        writeln!(f, "array_id\tmonomer_idx\tstart\tend\tlength\tletter\tsubtype\tsite_order\tsite_structure\tsites\tdistances\tsequence").unwrap();
+        writeln!(f, "#alphasplitter v{} / cut", env!("CARGO_PKG_VERSION")).unwrap();
+        writeln!(f, "#input: {}", args.input).unwrap();
+        writeln!(f, "#motifs_source: {}", args.motifs.as_deref().unwrap_or("<built-in primate alpha>")).unwrap();
+        let chain_sites_str: String = anchors.names.iter().zip(anchors.sequences.iter())
+            .map(|(n, s)| format!("{}={}", n, String::from_utf8_lossy(s)))
+            .collect::<Vec<_>>().join(" ");
+        writeln!(f, "#chain_sites: {}", chain_sites_str).unwrap();
+        writeln!(f, "#columns: array_id strand monomer_idx start end length letter subtype site_order site_structure sites distances sequence").unwrap();
+        writeln!(f, "array_id\tstrand\tmonomer_idx\tstart\tend\tlength\tletter\tsubtype\tsite_order\tsite_structure\tsites\tdistances\tsequence").unwrap();
         for m in &flat_monomers {
             let letter = key_to_letter.get(&m.letter_key).map(|s| s.as_str()).unwrap_or("?");
             let subtype = key_to_subtype.get(&m.subtype_key).map(|s| s.as_str()).unwrap_or("?");
@@ -368,8 +379,12 @@ pub fn run_from_args(argv: Vec<String>) {
             let dist_str: String = m.distances.iter()
                 .map(|(_, _, d)| format!("{}", d))
                 .collect::<Vec<_>>().join(",");
-            writeln!(f, "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
-                m.array_id, m.monomer_idx, m.start, m.end, m.length,
+            let (raw_id, strand) = match m.array_id.strip_suffix("_rc") {
+                Some(base) => (base, '-'),
+                None => (m.array_id.as_str(), '+'),
+            };
+            writeln!(f, "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                raw_id, strand, m.monomer_idx, m.start, m.end, m.length,
                 letter, subtype, m.site_order, m.site_structure, sites_str, dist_str, m.sequence).unwrap();
         }
     }
