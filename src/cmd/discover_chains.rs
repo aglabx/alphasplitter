@@ -65,6 +65,9 @@ struct Site {
     id: usize,
     sequence: String,
     length: usize,
+    // INVARIANT: canonical position within the monomer, always in [0, period).
+    // All mutations (e.g. leftward growth in grow_sites) must go through
+    // modular arithmetic (rem_euclid) to preserve this.
     position_mod_p: usize,
     family_support: f64,
     copy_support_median: f64,
@@ -394,7 +397,7 @@ pub fn run_from_args(argv: Vec<String>) {
 
     // === STEP 1b: Grow site boundaries ===
     eprintln!("\n=== Step 1b: Growing site boundaries ===");
-    let sites = grow_sites(sites, &working_arrays, n_arrays, 0.7);
+    let sites = grow_sites(sites, &working_arrays, n_arrays, 0.7, p);
 
     // === STEP 1c: Dedup and enforce spacer gaps ===
     eprintln!("\n=== Step 1c: Dedup + enforce spacers ===");
@@ -750,7 +753,7 @@ impl AnchorCandidate {
 
 // ============ SITE GROWTH ============
 
-fn grow_sites(sites: Vec<Site>, arrays: &[(String, Vec<u8>)], _n_arrays: usize, _min_support_frac: f64) -> Vec<Site> {
+fn grow_sites(sites: Vec<Site>, arrays: &[(String, Vec<u8>)], _n_arrays: usize, _min_support_frac: f64, period: usize) -> Vec<Site> {
     let max_extend = 30; // generous: entropy will tell us the real boundary
 
     sites.into_iter().map(|site| {
@@ -871,7 +874,13 @@ fn grow_sites(sites: Vec<Site>, arrays: &[(String, Vec<u8>)], _n_arrays: usize, 
         }).collect();
 
         let new_sequence = String::from_utf8(new_seq).unwrap();
-        let new_position = site.position_mod_p.wrapping_sub(left_ext);
+        // Growing left means the site's canonical start shifts backwards by left_ext.
+        // Do this modulo period so the invariant (position_mod_p ∈ [0, period)) holds
+        // even when the seed was near position 0.
+        let p_i = period as i64;
+        let new_position = ((site.position_mod_p as i64 - left_ext as i64).rem_euclid(p_i)) as usize;
+        debug_assert!(new_position < period,
+            "grow_sites produced position {} >= period {}", new_position, period);
 
         // Report with entropy at boundaries (positions just outside the grown region)
         let h_left = if left_ext > 0 && left_ext < max_extend {
