@@ -41,8 +41,11 @@ struct Args {
 }
 
 #[derive(Debug, Deserialize)]
-struct MotifsJson {
+struct ChainsJson {
+    #[serde(default)]
     motifs: Vec<MotifDef>,
+    #[serde(default)]
+    families: Vec<FamilyDef>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -53,6 +56,18 @@ struct MotifDef {
     position_in_monomer: usize,
 }
 
+#[derive(Debug, Deserialize)]
+struct FamilyDef {
+    id: String,
+    period: usize,
+    #[serde(default)]
+    sf_index: usize,
+    motifs: Vec<MotifDef>,
+    #[serde(default)]
+    arrays: Vec<String>,
+}
+
+#[derive(Clone)]
 struct AnchorSet {
     names: Vec<String>,
     sequences: Vec<Vec<u8>>,
@@ -62,34 +77,90 @@ struct AnchorSet {
     n_motifs: usize,
 }
 
-fn load_anchors(path: Option<&str>) -> AnchorSet {
+/// One SF family: a motif set plus its claimed arrays.
+/// Populated either from chains.json `families` (new) or synthesized
+/// from the legacy flat motif list / built-in defaults when no
+/// per-family info is available.
+#[derive(Clone)]
+struct Family {
+    id: String,
+    period: usize,
+    anchors: AnchorSet,
+    /// Original array names claimed by this family. Empty means "match
+    /// any array" (legacy single-family mode).
+    array_whitelist: Option<std::collections::HashSet<String>>,
+}
+
+fn anchors_from_motifs(defs: &[MotifDef]) -> AnchorSet {
+    let names: Vec<String> = defs.iter().map(|m| m.name.clone()).collect();
+    let seqs: Vec<Vec<u8>> = defs.iter().map(|m| m.sequence.as_bytes().to_vec()).collect();
+    let rcs: Vec<Vec<u8>> = seqs.iter().map(|s| revcomp(s)).collect();
+    let positions: Vec<usize> = defs.iter().map(|m| m.position_in_monomer).collect();
+    let mlen = seqs.first().map(|s| s.len()).unwrap_or(11);
+    let n = seqs.len();
+    let expected_spacers: Vec<usize> = (0..n).map(|i| {
+        if i + 1 < n {
+            let next_pos = positions[i + 1];
+            let this_end = positions[i] + seqs[i].len();
+            if next_pos > this_end { next_pos - this_end } else { 0 }
+        } else {
+            20
+        }
+    }).collect();
+    AnchorSet { names, sequences: seqs, rc_sequences: rcs, expected_spacers, motif_len: mlen, n_motifs: n }
+}
+
+/// Resolve motifs into one or more families.
+///
+/// Preference order:
+///   1. chains.json with `families` → one Family per SF, each restricted
+///      to its claimed arrays.
+///   2. chains.json with flat `motifs` only (legacy) → single Family
+///      matching any array.
+///   3. no --motifs → built-in primate alpha, single Family matching any.
+fn load_families(path: Option<&str>) -> Vec<Family> {
     match path {
         Some(p) => {
-            let data: MotifsJson = serde_json::from_str(
+            let data: ChainsJson = serde_json::from_str(
                 &std::fs::read_to_string(p).unwrap_or_else(|e| panic!("Cannot read {}: {}", p, e))
             ).unwrap();
-            let names: Vec<String> = data.motifs.iter().map(|m| m.name.clone()).collect();
-            let seqs: Vec<Vec<u8>> = data.motifs.iter().map(|m| m.sequence.as_bytes().to_vec()).collect();
-            let rcs: Vec<Vec<u8>> = seqs.iter().map(|s| revcomp(s)).collect();
-            let mlen = seqs.first().map(|s| s.len()).unwrap_or(11);
-            let n = seqs.len();
-            let positions: Vec<usize> = data.motifs.iter().map(|m| m.position_in_monomer).collect();
-            // Compute expected spacers between consecutive motifs
-            let expected_spacers: Vec<usize> = (0..n).map(|i| {
-                if i + 1 < n {
-                    let next_pos = positions[i + 1];
-                    let this_end = positions[i] + seqs[i].len();
-                    if next_pos > this_end { next_pos - this_end } else { 0 }
-                } else {
-                    20 // wrap spacer (rough)
+            if !data.families.is_empty() {
+                eprintln!("Loaded {} families from {}:", data.families.len(), p);
+                let mut out = Vec::new();
+                for fam in data.families {
+                    let anchors = anchors_from_motifs(&fam.motifs);
+                    eprintln!(
+                        "  {}: period={} sf={} motifs={} arrays={}",
+                        fam.id, fam.period, fam.sf_index, anchors.n_motifs, fam.arrays.len()
+                    );
+                    for (i, name) in anchors.names.iter().enumerate() {
+                        eprintln!(
+                            "    {}: {} ({}bp)",
+                            name, String::from_utf8_lossy(&anchors.sequences[i]), anchors.sequences[i].len()
+                        );
+                    }
+                    let whitelist: std::collections::HashSet<String> = fam.arrays.into_iter().collect();
+                    out.push(Family {
+                        id: fam.id,
+                        period: fam.period,
+                        anchors,
+                        array_whitelist: Some(whitelist),
+                    });
                 }
-            }).collect();
-            eprintln!("Loaded {} motifs from {} (len={})", n, p, mlen);
-            for (i, name) in names.iter().enumerate() {
-                let sp = if i < expected_spacers.len() { expected_spacers[i] } else { 0 };
-                eprintln!("  {}: {} ({}bp, pos={}, spacer_next={})", name, String::from_utf8_lossy(&seqs[i]), seqs[i].len(), positions[i], sp);
+                out
+            } else {
+                let anchors = anchors_from_motifs(&data.motifs);
+                eprintln!(
+                    "Loaded {} motifs from {} (legacy flat, no families) — running single-family mode",
+                    anchors.n_motifs, p
+                );
+                vec![Family {
+                    id: "default".into(),
+                    period: 0,
+                    anchors,
+                    array_whitelist: None,
+                }]
             }
-            AnchorSet { names, sequences: seqs, rc_sequences: rcs, expected_spacers, motif_len: mlen, n_motifs: n }
         }
         None => {
             let defaults: Vec<(&str, &str)> = vec![
@@ -99,12 +170,19 @@ fn load_anchors(path: Option<&str>) -> AnchorSet {
                 ("M4", "TCCACTTGCAG"),
                 ("M5", "AAAGAGTGTTT"),
             ];
-            let names: Vec<String> = defaults.iter().map(|(n, _)| n.to_string()).collect();
-            let seqs: Vec<Vec<u8>> = defaults.iter().map(|(_, s)| s.as_bytes().to_vec()).collect();
-            let rcs: Vec<Vec<u8>> = seqs.iter().map(|s| revcomp(s)).collect();
-            let expected_spacers = vec![9, 15, 34, 9, 49]; // v1 spacers
+            let defs: Vec<MotifDef> = defaults.iter().enumerate().map(|(i, (n, s))| MotifDef {
+                name: n.to_string(),
+                sequence: s.to_string(),
+                position_in_monomer: [21, 41, 67, 112, 132][i],
+            }).collect();
+            let anchors = anchors_from_motifs(&defs);
             eprintln!("Using built-in primate alpha satellite motifs (5 x 11bp)");
-            AnchorSet { names, sequences: seqs, rc_sequences: rcs, expected_spacers, motif_len: 11, n_motifs: 5 }
+            vec![Family {
+                id: "default".into(),
+                period: 171,
+                anchors,
+                array_whitelist: None,
+            }]
         }
     }
 }
@@ -123,6 +201,9 @@ struct MotifHit {
 #[derive(Debug, Clone)]
 struct Monomer {
     array_id: String,
+    /// Family that cut this monomer (e.g. "P171SF0", or "default" in
+    /// legacy single-family mode).
+    family_id: String,
     monomer_idx: u32,
     start: usize,
     end: usize,
@@ -145,7 +226,7 @@ struct Monomer {
 }
 
 /// Letter = structural monomer type (sites + distances)
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct Letter {
     key: String,
     name: String,        // A, B, C, ... AA, AB, ...
@@ -166,7 +247,27 @@ struct CutReport {
     n_monomers: usize,
     n_letters: usize,
     n_subtypes_total: usize,
+    families: Vec<FamilyReport>,
+}
+
+#[derive(Debug, Serialize)]
+struct FamilyReport {
+    id: String,
+    period: usize,
+    n_arrays: usize,
+    n_monomers: usize,
     letters: Vec<Letter>,
+}
+
+/// Output of running the scan → normalize → cut → classify pipeline on a
+/// single family's arrays.
+struct FamilyResult {
+    monomers: Vec<Monomer>,
+    letters: Vec<Letter>,
+    key_to_letter: HashMap<String, String>,
+    key_to_subtype: HashMap<String, String>,
+    arrays_cut: usize,
+    total_subtypes: usize,
 }
 
 pub fn run_from_args(argv: Vec<String>) {
@@ -179,47 +280,198 @@ pub fn run_from_args(argv: Vec<String>) {
             .ok();
     }
 
-    let anchors = load_anchors(args.motifs.as_deref());
-    let motifs: Vec<(Vec<u8>, Vec<u8>)> = anchors.sequences.iter().zip(anchors.rc_sequences.iter()).map(|(fwd, rc)| {
-        (fwd.clone(), rc.clone())
-    }).collect();
-
-    let n_motifs = anchors.n_motifs;
-    let motif_len = anchors.motif_len;
+    let families = load_families(args.motifs.as_deref());
 
     // --- Read ALL arrays ---
-    eprintln!("Reading {}...", args.input);
+    eprintln!("\nReading {}...", args.input);
     let all_arrays = read_fasta(&args.input);
     eprintln!("  {} total arrays in fasta", all_arrays.len());
 
-    // --- Scan motifs on ALL arrays, filter by min_motifs ---
-    eprintln!("Scanning for motifs in all arrays (min {} distinct motifs to keep)...", args.min_motifs);
+    // --- Partition arrays by family ---
+    // An array that's whitelisted by multiple families (shouldn't happen
+    // for discover_chains output, since SFs claim disjointly, but we
+    // still guard against it) goes to the first matching family.
+    // Arrays not claimed by any family are skipped.
+    let single_family_mode = families.iter().any(|f| f.array_whitelist.is_none());
+    let mut buckets: Vec<Vec<(String, Vec<u8>)>> = vec![Vec::new(); families.len()];
+    let mut unclaimed = 0usize;
+    for (name, seq) in &all_arrays {
+        if single_family_mode {
+            buckets[0].push((name.clone(), seq.clone()));
+            continue;
+        }
+        let mut placed = false;
+        for (fi, fam) in families.iter().enumerate() {
+            if let Some(wl) = &fam.array_whitelist {
+                if wl.contains(name) {
+                    buckets[fi].push((name.clone(), seq.clone()));
+                    placed = true;
+                    break;
+                }
+            }
+        }
+        if !placed { unclaimed += 1; }
+    }
+    if !single_family_mode {
+        eprintln!(
+            "  array → family assignment: {} claimed, {} unclaimed (skipped)",
+            all_arrays.len() - unclaimed, unclaimed
+        );
+    }
 
-    let scan_results: Vec<(String, Vec<u8>, Vec<MotifHit>, usize)> = all_arrays.par_iter().map(|(name, seq)| {
+    // --- Run the per-family pipeline ---
+    let mut family_results: Vec<(Family, FamilyResult)> = Vec::new();
+    for (fam, fam_arrays) in families.into_iter().zip(buckets.into_iter()) {
+        if fam_arrays.is_empty() {
+            eprintln!("\n===== Family {} : no arrays, skipping =====", fam.id);
+            continue;
+        }
+        eprintln!("\n===== Family {} : {} arrays =====", fam.id, fam_arrays.len());
+        let result = process_family(&fam, &fam_arrays, &args);
+        family_results.push((fam, result));
+    }
+
+    // --- Aggregate stats for top-level report ---
+    let total_monomers: usize = family_results.iter().map(|(_, r)| r.monomers.len()).sum();
+    let arrays_cut: usize = family_results.iter().map(|(_, r)| r.arrays_cut).sum();
+    let total_letters: usize = family_results.iter().map(|(_, r)| r.letters.len()).sum();
+    let total_subtypes: usize = family_results.iter().map(|(_, r)| r.total_subtypes).sum();
+
+    // --- Write outputs ---
+    eprintln!("\nWriting outputs...");
+
+    // Monomers TSV — self-describing manifest, then one row per monomer.
+    // Contract:
+    //   `family`  = SF family that cut this monomer (e.g. "P171SF0")
+    //   `array_id` = original FASTA name (no _rc suffix)
+    //   `strand`  = '+' if kept forward, '-' if motif_cut revcomped the
+    //              array during strand normalization.
+    {
+        use std::io::Write;
+        let mut f = std::io::BufWriter::new(std::fs::File::create(&args.output).unwrap());
+        writeln!(f, "#alphasplitter v{} / cut", env!("CARGO_PKG_VERSION")).unwrap();
+        writeln!(f, "#input: {}", args.input).unwrap();
+        writeln!(f, "#motifs_source: {}", args.motifs.as_deref().unwrap_or("<built-in primate alpha>")).unwrap();
+        for (fam, _) in &family_results {
+            let chain_sites_str: String = fam.anchors.names.iter().zip(fam.anchors.sequences.iter())
+                .map(|(n, s)| format!("{}={}", n, String::from_utf8_lossy(s)))
+                .collect::<Vec<_>>().join(" ");
+            writeln!(f, "#family {} period={} sites: {}", fam.id, fam.period, chain_sites_str).unwrap();
+        }
+        writeln!(f, "#columns: family array_id strand monomer_idx start end length letter subtype site_order site_structure sites distances sequence").unwrap();
+        writeln!(f, "family\tarray_id\tstrand\tmonomer_idx\tstart\tend\tlength\tletter\tsubtype\tsite_order\tsite_structure\tsites\tdistances\tsequence").unwrap();
+        for (fam, res) in &family_results {
+            for m in &res.monomers {
+                let letter = res.key_to_letter.get(&m.letter_key).map(|s| s.as_str()).unwrap_or("?");
+                let subtype = res.key_to_subtype.get(&m.subtype_key).map(|s| s.as_str()).unwrap_or("?");
+                let sites_str: String = (0..fam.anchors.n_motifs).map(|i| if m.site_present[i] { '1' } else { '0' }).collect();
+                let dist_str: String = m.distances.iter()
+                    .map(|(_, _, d)| format!("{}", d))
+                    .collect::<Vec<_>>().join(",");
+                let (raw_id, strand) = match m.array_id.strip_suffix("_rc") {
+                    Some(base) => (base, '-'),
+                    None => (m.array_id.as_str(), '+'),
+                };
+                writeln!(f, "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                    m.family_id, raw_id, strand, m.monomer_idx, m.start, m.end, m.length,
+                    letter, subtype, m.site_order, m.site_structure, sites_str, dist_str, m.sequence).unwrap();
+            }
+        }
+    }
+
+    // Consensus FASTA — prefix letter name with family_id so records
+    // don't collide between families.
+    {
+        use std::io::Write;
+        let mut f = std::io::BufWriter::new(std::fs::File::create(&args.consensus_fa).unwrap());
+        for (fam, res) in &family_results {
+            for lt in &res.letters {
+                if lt.consensus.is_empty() { continue; }
+                let sites_str: String = (0..fam.anchors.n_motifs).map(|i| if lt.site_present[i] { '1' } else { '0' }).collect();
+                writeln!(f, ">{}:letter_{} n={} sites={} len={:.0} subtypes={}",
+                    fam.id, lt.name, lt.size, sites_str, lt.mean_length, lt.n_subtypes).unwrap();
+                writeln!(f, "{}", lt.consensus).unwrap();
+            }
+        }
+    }
+
+    // HOR strings per array (pipe-separated letters, per-family)
+    {
+        use std::io::Write;
+        let hor_path = args.output.replace(".tsv", "_hor.tsv");
+        let mut f = std::io::BufWriter::new(std::fs::File::create(&hor_path).unwrap());
+        writeln!(f, "family\tarray_id\tn_monomers\thor_string").unwrap();
+
+        for (_fam, res) in &family_results {
+            let mut array_monomers: HashMap<String, Vec<(u32, String)>> = HashMap::new();
+            for m in &res.monomers {
+                let letter = res.key_to_letter.get(&m.letter_key).map(|s| s.as_str()).unwrap_or("?");
+                array_monomers.entry(m.array_id.clone()).or_default().push((m.monomer_idx, letter.to_string()));
+            }
+            let mut sorted_arrays: Vec<_> = array_monomers.iter().collect();
+            sorted_arrays.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
+            for (array_id, monomers) in &sorted_arrays {
+                let mut mono_sorted: Vec<_> = monomers.to_vec();
+                mono_sorted.sort_by_key(|m| m.0);
+                let hor_str: String = mono_sorted.iter().map(|(_, l)| l.as_str()).collect::<Vec<_>>().join("|");
+                let raw_id = array_id.strip_suffix("_rc").unwrap_or(array_id);
+                let fam_id = &res.monomers.first().map(|m| m.family_id.as_str()).unwrap_or("?");
+                writeln!(f, "{}\t{}\t{}\t{}", fam_id, raw_id, mono_sorted.len(), hor_str).unwrap();
+            }
+        }
+
+        eprintln!("  HOR strings: {}", hor_path);
+    }
+
+    // Report JSON
+    let report = CutReport {
+        n_arrays: all_arrays.len(),
+        n_arrays_cut: arrays_cut,
+        n_monomers: total_monomers,
+        n_letters: total_letters,
+        n_subtypes_total: total_subtypes,
+        families: family_results.iter().map(|(fam, res)| FamilyReport {
+            id: fam.id.clone(),
+            period: fam.period,
+            n_arrays: res.arrays_cut,
+            n_monomers: res.monomers.len(),
+            letters: res.letters.clone(),
+        }).collect(),
+    };
+    std::fs::write(&args.report, serde_json::to_string_pretty(&report).unwrap()).unwrap();
+
+    eprintln!("Done.");
+}
+
+/// Run scan → normalize → cut → classify on one family's arrays.
+fn process_family(fam: &Family, family_arrays: &[(String, Vec<u8>)], args: &Args) -> FamilyResult {
+    let anchors = &fam.anchors;
+    let motifs: Vec<(Vec<u8>, Vec<u8>)> = anchors.sequences.iter().zip(anchors.rc_sequences.iter())
+        .map(|(f, r)| (f.clone(), r.clone())).collect();
+    let n_motifs = anchors.n_motifs;
+    let motif_len = anchors.motif_len;
+
+    eprintln!("  scanning motifs (min {} distinct)...", args.min_motifs);
+    let scan_results: Vec<(String, Vec<u8>, Vec<MotifHit>, usize)> = family_arrays.par_iter().map(|(name, seq)| {
         let hits = scan_motifs(seq, &motifs, args.max_mismatch);
-        let distinct_motifs = {
+        let distinct = {
             let mut seen = vec![false; n_motifs];
             for h in &hits { seen[h.motif_idx] = true; }
             seen.iter().filter(|&&b| b).count()
         };
-        (name.clone(), seq.clone(), hits, distinct_motifs)
+        (name.clone(), seq.clone(), hits, distinct)
     }).collect();
 
     let arrays_passing = scan_results.iter().filter(|(_, _, _, dm)| *dm >= args.min_motifs).count();
-    eprintln!("  Arrays with >= {} distinct motifs: {}", args.min_motifs, arrays_passing);
+    eprintln!("  arrays passing motif filter: {}", arrays_passing);
 
-    // --- Strand normalize: revcomp arrays where majority of hits are on '-' strand ---
-    eprintln!("Strand normalizing arrays...");
-
+    eprintln!("  strand normalizing...");
     let normalized: Vec<(String, Vec<u8>, Vec<MotifHit>, usize)> = scan_results.into_par_iter()
         .filter(|(_, _, _, dm)| *dm >= args.min_motifs)
         .map(|(name, seq, hits, dm)| {
-            // Count forward vs reverse hits
             let fwd_count = hits.iter().filter(|h| h.strand == '+').count();
             let rc_count = hits.iter().filter(|h| h.strand == '-').count();
-
             if rc_count > fwd_count {
-                // Revcomp the sequence, rescan motifs
                 let rc_seq = revcomp(&seq);
                 let new_hits = scan_motifs(&rc_seq, &motifs, args.max_mismatch);
                 let new_dm = {
@@ -234,60 +486,36 @@ pub fn run_from_args(argv: Vec<String>) {
         }).collect();
 
     let n_flipped = normalized.iter().filter(|(n, _, _, _)| n.ends_with("_rc")).count();
-    let n_kept = normalized.len() - n_flipped;
-    eprintln!("  Kept forward: {}, flipped to revcomp: {}", n_kept, n_flipped);
+    eprintln!("  kept fwd: {}, flipped: {}", normalized.len() - n_flipped, n_flipped);
 
-    // --- Cut monomers from normalized arrays ---
-    eprintln!("Cutting monomers...");
-
+    eprintln!("  cutting monomers...");
+    let ref_seqs: Vec<String> = anchors.sequences.iter().map(|s| String::from_utf8_lossy(s).to_string()).collect();
     let all_monomers: Vec<Vec<Monomer>> = normalized.par_iter()
         .map(|(name, seq, hits, _)| {
-            let ref_seqs: Vec<String> = anchors.sequences.iter().map(|s| String::from_utf8_lossy(s).to_string()).collect();
-            cut_at_motifs(name, seq, hits, n_motifs, motif_len, &anchors.names, &anchors.expected_spacers, &ref_seqs)
+            cut_at_motifs(name, &fam.id, seq, hits, n_motifs, motif_len, &anchors.names, &anchors.expected_spacers, &ref_seqs)
         }).collect();
-
-    let total_monomers: usize = all_monomers.iter().map(|v| v.len()).sum();
     let arrays_cut = all_monomers.iter().filter(|v| !v.is_empty()).count();
-    eprintln!("  {} monomers from {} arrays (of {} passing motif filter)", total_monomers, arrays_cut, arrays_passing);
+    let flat: Vec<Monomer> = all_monomers.into_iter().flatten().collect();
+    eprintln!("  {} monomers from {} arrays", flat.len(), arrays_cut);
 
-    // --- Classify: letters (structural) and subtypes (site mutations) ---
-    eprintln!("Classifying into letters and subtypes...");
-
-    let flat_monomers: Vec<&Monomer> = all_monomers.iter().flat_map(|v| v.iter()).collect();
-    let n_total = flat_monomers.len();
-
-    // Group by letter_key (structural: sites + distances)
+    // Classify within this family only.
+    let n_total = flat.len();
     let mut letter_members: HashMap<String, Vec<usize>> = HashMap::new();
-    for (i, m) in flat_monomers.iter().enumerate() {
+    for (i, m) in flat.iter().enumerate() {
         letter_members.entry(m.letter_key.clone()).or_default().push(i);
     }
     let mut letter_list: Vec<(String, Vec<usize>)> = letter_members.into_iter().collect();
     letter_list.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
 
-    // Assign letter names: A, B, C, ... Z, AA, AB, ...
-    fn make_letter_name(rank: usize) -> String {
-        if rank < 26 {
-            format!("{}", (b'A' + rank as u8) as char)
-        } else {
-            let first = (rank / 26 - 1).min(25);
-            let second = rank % 26;
-            format!("{}{}", (b'A' + first as u8) as char, (b'A' + second as u8) as char)
-        }
-    }
-
     let mut letters: Vec<Letter> = Vec::new();
     let mut key_to_letter: HashMap<String, String> = HashMap::new();
     let mut key_to_subtype: HashMap<String, String> = HashMap::new();
     let mut total_subtypes = 0usize;
-
     for (rank, (key, members)) in letter_list.iter().enumerate() {
         let letter_name = make_letter_name(rank);
         key_to_letter.insert(key.clone(), letter_name.clone());
-
-        let sample = &flat_monomers[members[0]];
-        let mean_len = members.iter().map(|&i| flat_monomers[i].length as f64).sum::<f64>() / members.len() as f64;
-
-        // Distance pattern string
+        let sample = &flat[members[0]];
+        let mean_len = members.iter().map(|&i| flat[i].length as f64).sum::<f64>() / members.len() as f64;
         let dist_str = if !sample.distances.is_empty() {
             sample.distances.iter()
                 .map(|(f, t, d)| format!("{}→{}:{}", anchors.names[*f], anchors.names[*t], d))
@@ -295,156 +523,74 @@ pub fn run_from_args(argv: Vec<String>) {
         } else {
             "no_sites".to_string()
         };
-
-        // Count subtypes within this letter
         let mut subtype_counts: HashMap<String, usize> = HashMap::new();
         for &mi in members {
-            *subtype_counts.entry(flat_monomers[mi].subtype_key.clone()).or_insert(0) += 1;
+            *subtype_counts.entry(flat[mi].subtype_key.clone()).or_insert(0) += 1;
         }
         let n_subtypes = subtype_counts.len();
         total_subtypes += n_subtypes;
-
-        // Assign subtype names
         let mut subtype_list: Vec<(String, usize)> = subtype_counts.into_iter().collect();
         subtype_list.sort_by(|a, b| b.1.cmp(&a.1));
         for (si, (skey, _)) in subtype_list.iter().enumerate() {
-            let subtype_name = format!("{}{}", letter_name, si + 1);
-            key_to_subtype.insert(skey.clone(), subtype_name);
+            key_to_subtype.insert(skey.clone(), format!("{}{}", letter_name, si + 1));
         }
-
-        // Build consensus
         let consensus = {
             let seqs: Vec<&[u8]> = members.iter()
                 .take(5000)
-                .map(|&i| flat_monomers[i].sequence.as_bytes())
-                .filter(|s| s.len() == flat_monomers[members[0]].length)
+                .map(|&i| flat[i].sequence.as_bytes())
+                .filter(|s| s.len() == flat[members[0]].length)
                 .collect();
             if !seqs.is_empty() && seqs[0].len() < 500 {
                 build_consensus(&seqs, seqs[0].len())
             } else { String::new() }
         };
-
         letters.push(Letter {
             key: key.clone(),
-            name: letter_name.clone(),
+            name: letter_name,
             size: members.len(),
             site_present: sample.site_present.clone(),
             n_sites: sample.site_present.iter().filter(|&&b| b).count(),
             distance_pattern: dist_str,
             mean_length: mean_len,
             consensus,
-            fraction: members.len() as f64 / n_total as f64,
+            fraction: if n_total > 0 { members.len() as f64 / n_total as f64 } else { 0.0 },
             n_subtypes,
         });
     }
 
-    // Print summary
-    eprintln!("\n=== ALPHABET: {} letters, {} subtypes, {} monomers ===", letters.len(), total_subtypes, n_total);
-    for lt in letters.iter().take(30) {
-        let sites_str: String = (0..anchors.n_motifs).map(|i| if lt.site_present[i] { '●' } else { '·' }).collect();
-        eprintln!("  {:<4} n={:>6} ({:>4.1}%) len={:>5.0} sites={} sub={:>3}  {}",
-            lt.name, lt.size, lt.fraction * 100.0, lt.mean_length, sites_str,
-            lt.n_subtypes, {
-                let s = &lt.distance_pattern;
-                if s.len() <= 60 { s.as_str() } else { s.char_indices().nth(50).map(|(i, _)| &s[..i]).unwrap_or(s) }
-            });
+    eprintln!("  {}: {} letters, {} subtypes, {} monomers", fam.id, letters.len(), total_subtypes, n_total);
+    for lt in letters.iter().take(10) {
+        let sites_str: String = (0..n_motifs).map(|i| if lt.site_present[i] { '●' } else { '·' }).collect();
+        eprintln!("    {:<4} n={:>6} ({:>4.1}%) len={:>5.0} sites={} sub={:>3}",
+            lt.name, lt.size, lt.fraction * 100.0, lt.mean_length, sites_str, lt.n_subtypes);
     }
-    if letters.len() > 30 {
-        eprintln!("  ... {} more letters", letters.len() - 30);
+    if letters.len() > 10 {
+        eprintln!("    ... {} more letters", letters.len() - 10);
     }
 
-    // --- Write outputs ---
-    eprintln!("\nWriting outputs...");
-
-    // Monomers TSV — with a self-describing manifest header.
-    // Contract: every row is one monomer on one array; `strand` is + for
-    // arrays kept as input and - for arrays where motif_cut revcomped them
-    // during normalization. `array_id` is the original FASTA name (no _rc).
-    {
-        use std::io::Write;
-        let mut f = std::io::BufWriter::new(std::fs::File::create(&args.output).unwrap());
-        writeln!(f, "#alphasplitter v{} / cut", env!("CARGO_PKG_VERSION")).unwrap();
-        writeln!(f, "#input: {}", args.input).unwrap();
-        writeln!(f, "#motifs_source: {}", args.motifs.as_deref().unwrap_or("<built-in primate alpha>")).unwrap();
-        let chain_sites_str: String = anchors.names.iter().zip(anchors.sequences.iter())
-            .map(|(n, s)| format!("{}={}", n, String::from_utf8_lossy(s)))
-            .collect::<Vec<_>>().join(" ");
-        writeln!(f, "#chain_sites: {}", chain_sites_str).unwrap();
-        writeln!(f, "#columns: array_id strand monomer_idx start end length letter subtype site_order site_structure sites distances sequence").unwrap();
-        writeln!(f, "array_id\tstrand\tmonomer_idx\tstart\tend\tlength\tletter\tsubtype\tsite_order\tsite_structure\tsites\tdistances\tsequence").unwrap();
-        for m in &flat_monomers {
-            let letter = key_to_letter.get(&m.letter_key).map(|s| s.as_str()).unwrap_or("?");
-            let subtype = key_to_subtype.get(&m.subtype_key).map(|s| s.as_str()).unwrap_or("?");
-            let sites_str: String = (0..anchors.n_motifs).map(|i| if m.site_present[i] { '1' } else { '0' }).collect();
-            let dist_str: String = m.distances.iter()
-                .map(|(_, _, d)| format!("{}", d))
-                .collect::<Vec<_>>().join(",");
-            let (raw_id, strand) = match m.array_id.strip_suffix("_rc") {
-                Some(base) => (base, '-'),
-                None => (m.array_id.as_str(), '+'),
-            };
-            writeln!(f, "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
-                raw_id, strand, m.monomer_idx, m.start, m.end, m.length,
-                letter, subtype, m.site_order, m.site_structure, sites_str, dist_str, m.sequence).unwrap();
-        }
-    }
-
-    // Consensus FASTA
-    {
-        use std::io::Write;
-        let mut f = std::io::BufWriter::new(std::fs::File::create(&args.consensus_fa).unwrap());
-        for lt in &letters {
-            if lt.consensus.is_empty() { continue; }
-            let sites_str: String = (0..anchors.n_motifs).map(|i| if lt.site_present[i] { '1' } else { '0' }).collect();
-            writeln!(f, ">letter_{} n={} sites={} len={:.0} subtypes={}",
-                lt.name, lt.size, sites_str, lt.mean_length, lt.n_subtypes).unwrap();
-            writeln!(f, "{}", lt.consensus).unwrap();
-        }
-    }
-
-    // HOR strings per array (with | separator)
-    {
-        use std::io::Write;
-        let hor_path = args.output.replace(".tsv", "_hor.tsv");
-        let mut f = std::io::BufWriter::new(std::fs::File::create(&hor_path).unwrap());
-        writeln!(f, "array_id\tn_monomers\thor_string").unwrap();
-
-        let mut array_monomers: HashMap<String, Vec<(u32, String)>> = HashMap::new();
-        for m in &flat_monomers {
-            let letter = key_to_letter.get(&m.letter_key).map(|s| s.as_str()).unwrap_or("?");
-            array_monomers.entry(m.array_id.clone()).or_default().push((m.monomer_idx, letter.to_string()));
-        }
-
-        let mut sorted_arrays: Vec<_> = array_monomers.iter().collect();
-        sorted_arrays.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
-
-        for (array_id, monomers) in &sorted_arrays {
-            let mut mono_sorted: Vec<_> = monomers.to_vec();
-            mono_sorted.sort_by_key(|m| m.0);
-            let hor_str: String = mono_sorted.iter().map(|(_, l)| l.as_str()).collect::<Vec<_>>().join("|");
-            writeln!(f, "{}\t{}\t{}", array_id, mono_sorted.len(), hor_str).unwrap();
-        }
-
-        eprintln!("  HOR strings: {}", hor_path);
-    }
-
-    // Report JSON
-    let report = CutReport {
-        n_arrays: all_arrays.len(),
-        n_arrays_cut: arrays_cut,
-        n_monomers: total_monomers,
-        n_letters: letters.len(),
-        n_subtypes_total: total_subtypes,
+    FamilyResult {
+        monomers: flat,
         letters,
-    };
-    std::fs::write(&args.report, serde_json::to_string_pretty(&report).unwrap()).unwrap();
+        key_to_letter,
+        key_to_subtype,
+        arrays_cut,
+        total_subtypes,
+    }
+}
 
-    eprintln!("Done.");
+fn make_letter_name(rank: usize) -> String {
+    if rank < 26 {
+        format!("{}", (b'A' + rank as u8) as char)
+    } else {
+        let first = (rank / 26 - 1).min(25);
+        let second = rank % 26;
+        format!("{}{}", (b'A' + first as u8) as char, (b'A' + second as u8) as char)
+    }
 }
 
 // ============ CUTTING LOGIC ============
 
-fn cut_at_motifs(array_id: &str, seq: &[u8], hits: &[MotifHit], n_motifs: usize, motif_len: usize, anchor_names: &[String], expected_spacers: &[usize], anchors_ref: &[String]) -> Vec<Monomer> {
+fn cut_at_motifs(array_id: &str, family_id: &str, seq: &[u8], hits: &[MotifHit], n_motifs: usize, motif_len: usize, anchor_names: &[String], expected_spacers: &[usize], anchors_ref: &[String]) -> Vec<Monomer> {
     if hits.is_empty() { return vec![]; }
 
     // Strategy: find M1 occurrences as monomer start points.
@@ -693,6 +839,7 @@ fn cut_at_motifs(array_id: &str, seq: &[u8], hits: &[MotifHit], n_motifs: usize,
 
         monomers.push(Monomer {
             array_id: array_id.to_string(),
+            family_id: family_id.to_string(),
             monomer_idx: monomers.len() as u32,
             start: start_pos,
             end: end_pos,

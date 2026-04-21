@@ -107,8 +107,24 @@ struct ChainReport {
     sites: Vec<Site>,
     links: Vec<Link>,
     chains: Vec<Chain>,
+    /// Flat list of all motifs (backward-compat: motif_cut used to read this).
+    /// New consumers should use `families` below, which carries per-SF
+    /// motif bundles AND the array membership each SF has claimed.
     motifs: Vec<MotifCompat>,
-    families: Vec<ProvisionalFamily>,
+    families: Vec<SfFamily>,
+    provisional_families: Vec<ProvisionalFamily>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct SfFamily {
+    /// Stable id: "P<period>SF<sf_index>"
+    id: String,
+    period: usize,
+    sf_index: usize,
+    motifs: Vec<MotifCompat>,
+    /// Original array names (no _rc) claimed by this SF.
+    arrays: Vec<String>,
+    n_arrays: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -186,6 +202,7 @@ pub fn run_from_args(argv: Vec<String>) {
     // Track which arrays are claimed globally
     let mut claimed_names: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut all_sf_motifs: Vec<(String, Vec<MotifCompat>)> = Vec::new(); // (label, motifs)
+    let mut sf_families: Vec<SfFamily> = Vec::new();
     let mut global_sf_id = 0usize;
 
     let k = args.k_start;
@@ -642,9 +659,11 @@ pub fn run_from_args(argv: Vec<String>) {
         .map(|a| a.name.clone())
         .collect();
 
-    let n_new_claimed = compatible_in_enrichment.iter()
+    let newly_claimed: Vec<String> = compatible_in_enrichment.iter()
         .filter(|n| !claimed_names.contains(*n))
-        .count();
+        .cloned()
+        .collect();
+    let n_new_claimed = newly_claimed.len();
     claimed_names.extend(compatible_in_enrichment);
 
     eprintln!("\n  SF{}: {} compatible arrays, {} newly claimed (total claimed: {})",
@@ -676,7 +695,26 @@ pub fn run_from_args(argv: Vec<String>) {
         eprintln!("    {}: {} ({}bp)", m.name, m.sequence, m.sequence.len());
     }
 
-    all_sf_motifs.push((format!("P{}SF{}", target_period, sf_id), sf_motifs));
+    let family_id = format!("P{}SF{}", target_period, sf_id);
+    all_sf_motifs.push((family_id.clone(), sf_motifs.clone()));
+
+    // Record membership: only the arrays newly claimed by THIS SF.
+    // Strip any "_rc" suffix so the name matches the original FASTA.
+    let mut arrays_for_family: Vec<String> = newly_claimed
+        .into_iter()
+        .map(|n| n.strip_suffix("_rc").map(|s| s.to_string()).unwrap_or(n))
+        .collect();
+    arrays_for_family.sort();
+    arrays_for_family.dedup();
+    let n_family_arrays = arrays_for_family.len();
+    sf_families.push(SfFamily {
+        id: family_id,
+        period: target_period,
+        sf_index: sf_id,
+        motifs: sf_motifs,
+        arrays: arrays_for_family,
+        n_arrays: n_family_arrays,
+    });
     global_sf_id += 1;
 
     if n_new_claimed == 0 {
@@ -725,7 +763,8 @@ pub fn run_from_args(argv: Vec<String>) {
         links: Vec::new(),
         chains: Vec::new(),
         motifs,
-        families,
+        families: sf_families,
+        provisional_families: families,
     };
 
     std::fs::write(&args.output, serde_json::to_string_pretty(&report).unwrap()).unwrap();
