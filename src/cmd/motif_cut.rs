@@ -631,6 +631,14 @@ fn process_family(fam: &Family, family_arrays: &[(String, Vec<u8>)], args: &Args
     }
 }
 
+fn site_display_char(i: usize) -> char {
+    match i {
+        0..=25 => (b'a' + i as u8) as char,
+        26..=51 => (b'A' + (i - 26) as u8) as char,
+        _ => '?',
+    }
+}
+
 fn make_letter_name(rank: usize) -> String {
     if rank < 26 {
         format!("{}", (b'A' + rank as u8) as char)
@@ -790,8 +798,11 @@ fn cut_at_motifs(array_id: &str, family_id: &str, seq: &[u8], hits: &[MotifHit],
         }
         mono_hits.sort_by_key(|&(_, p)| p);
 
-        // Build site_order string: all sites (found + inferred) in positional order
-        let site_letters: Vec<char> = (0..n_motifs).map(|i| (b'a' + i as u8) as char).collect();
+        // Build site_order string: all sites (found + inferred) in positional order.
+        // Single-char display: a..z (0..25), A..Z (26..51), '?' for overflow.
+        // Real satellites have <<52 motifs, so the overflow path only triggers
+        // for degenerate inputs (e.g. garbage-in arrays from misparsed periods).
+        let site_letters: Vec<char> = (0..n_motifs).map(site_display_char).collect();
         let all_hits_order: String = mono_hits.iter()
             .map(|&(si, _)| if si < site_letters.len() { site_letters[si] } else { '?' })
             .collect();

@@ -6,3 +6,14 @@ Cargo.lock
 .DS_Store
 /data
 /results
+
+# Default-named artifacts written to cwd when `alphasplitter cut` / `run`
+# is invoked without explicit paths.
+/chains.json
+/families.json
+/family_consensus.fa
+/monomers.tsv
+/monomers_hor.tsv
+/annotated.tsv
+/phase_score.tsv
+/letters/
