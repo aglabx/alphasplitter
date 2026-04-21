@@ -27,6 +27,12 @@ struct Args {
     #[arg(long, default_value = "family_consensus.fa")]
     consensus_fa: String,
 
+    /// Output directory for per-letter monomer dumps. One file per
+    /// (family, letter); each row is `seq \t metadata...`. Default:
+    /// `<dir-of-output-tsv>/letters/`.
+    #[arg(long)]
+    letters_dir: Option<String>,
+
     /// Max hamming distance for fuzzy motif match
     #[arg(long, default_value_t = 2)]
     max_mismatch: u32,
@@ -421,6 +427,53 @@ pub fn run_from_args(argv: Vec<String>) {
         }
 
         eprintln!("  HOR strings: {}", hor_path);
+    }
+
+    // Per-letter monomer dumps: one file per (family, letter). Format is
+    // one row per monomer, sequence first so downstream `cut`/grep/awk
+    // stays easy. File layout: <letters_dir>/<family>/<letter>.tsv.
+    {
+        use std::io::Write;
+        let letters_dir = match &args.letters_dir {
+            Some(d) => std::path::PathBuf::from(d),
+            None => {
+                let out = std::path::PathBuf::from(&args.output);
+                out.parent().unwrap_or(std::path::Path::new(".")).join("letters")
+            }
+        };
+        std::fs::create_dir_all(&letters_dir).expect("create letters dir");
+        let mut n_files = 0usize;
+        for (fam, res) in &family_results {
+            let fam_dir = letters_dir.join(&fam.id);
+            std::fs::create_dir_all(&fam_dir).expect("create family letters dir");
+
+            // Group monomers by letter name (A, B, C, ...).
+            let mut per_letter: HashMap<String, Vec<&Monomer>> = HashMap::new();
+            for m in &res.monomers {
+                let letter = res.key_to_letter.get(&m.letter_key).cloned().unwrap_or_else(|| "?".into());
+                per_letter.entry(letter).or_default().push(m);
+            }
+            for (letter_name, mons) in &per_letter {
+                let path = fam_dir.join(format!("{}.tsv", letter_name));
+                let mut f = std::io::BufWriter::new(std::fs::File::create(&path).unwrap());
+                writeln!(f, "#alphasplitter v{} / cut letters", env!("CARGO_PKG_VERSION")).unwrap();
+                writeln!(f, "#family: {} period={}", fam.id, fam.period).unwrap();
+                writeln!(f, "#letter: {} (n={})", letter_name, mons.len()).unwrap();
+                writeln!(f, "#columns: sequence array_id strand start end length monomer_idx subtype site_order site_structure").unwrap();
+                for m in mons {
+                    let subtype = res.key_to_subtype.get(&m.subtype_key).map(|s| s.as_str()).unwrap_or("?");
+                    let (raw_id, strand) = match m.array_id.strip_suffix("_rc") {
+                        Some(base) => (base, '-'),
+                        None => (m.array_id.as_str(), '+'),
+                    };
+                    writeln!(f, "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                        m.sequence, raw_id, strand, m.start, m.end, m.length,
+                        m.monomer_idx, subtype, m.site_order, m.site_structure).unwrap();
+                }
+                n_files += 1;
+            }
+        }
+        eprintln!("  per-letter dumps: {} files under {}", n_files, letters_dir.display());
     }
 
     // Report JSON
