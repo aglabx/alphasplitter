@@ -6,34 +6,35 @@ AlphaSplitter identifies periodic conserved anchor sites in satellite DNA, assem
 
 ## Quick Start
 
-AlphaSplitter is a set of independent Rust binaries (one per `src/bin/*.rs`), not a single CLI with subcommands. Build once, then call each binary directly.
+AlphaSplitter is a single `alphasplitter` CLI with subcommands. Build once, then invoke.
 
 ```bash
-# Build all binaries (or: cargo build --release)
-make
+# Build
+cargo build --release          # or: make
 
-# Full auto-satellome (discovers all periods and subfamilies)
-./target/release/discover_chains input.10kb.fasta -o chains.json -t 96
+# End-to-end pipeline (discover → cut → annotate)
+./target/release/alphasplitter run arrays.10kb.fasta -o results/ -t 96
 
-# Cut monomers and classify
-./target/release/motif_cut input.10kb.fasta -m chains.json -o monomers.tsv -t 96
-
-# Annotate CENP-B boxes
-./target/release/annotate_cenpb monomers.tsv annotated.tsv
+# Or stage-by-stage
+./target/release/alphasplitter discover arrays.10kb.fasta -o chains.json -t 96
+./target/release/alphasplitter cut      arrays.10kb.fasta -m chains.json -o monomers.tsv -t 96
+./target/release/alphasplitter annotate monomers.tsv annotated.tsv
 ```
 
-Each binary supports `--help`, e.g. `./target/release/discover_chains --help`.
-
-The `make run INPUT=arrays.10kb.fasta THREADS=96` target chains all three steps end-to-end. Run `make help` to see all targets.
+Run `alphasplitter --help` for the full subcommand list; every subcommand takes `--help` as well. `make run INPUT=arrays.10kb.fasta OUTDIR=results THREADS=96` is the Makefile shortcut for the end-to-end path.
 
 ## What it does
 
-**Input:** FASTA file of satellite DNA arrays (e.g., from [Satellome](https://github.com/ad3002/satellome) or TRASH)
+**Input:** FASTA of satellite DNA arrays (e.g., from [Satellome](https://github.com/ad3002/satellome) or TRASH).
 
-**Output:**
-- `chains.json` — discovered anchor sites and chain structure per satellite family
-- `monomers.tsv` — per-monomer annotation: letter, subtype, site_order, site_structure, CENP-B box
-- HOR strings showing higher-order repeat patterns
+**Output (under `-o <outdir>`):**
+- `chains.json` — per-SF motif bundles with claimed array membership
+- `monomers.tsv` — one row per monomer: `family`, `array_id`, coords, `letter`, `subtype`, `site_order`, `site_structure`, sequence
+- `monomers_hor.tsv` — HOR strings per array
+- `annotated.tsv` — `monomers.tsv` + CENP-B columns
+- `families.json` — per-family alphabet report
+- `family_consensus.fa` — one consensus per (family, letter)
+- `letters/<family>/<letter>.tsv` — all monomers of each letter, one row per monomer (sequence first, then metadata) — ready to feed into muscle/hmmbuild
 
 ## Pipeline
 
@@ -41,24 +42,27 @@ The `make run INPUT=arrays.10kb.fasta THREADS=96` target chains all three steps 
 satellome .10kb.fasta
   │
   ▼
-discover_chains (per period, iterative SF discovery)
+alphasplitter discover      (per-period, iterative SF discovery)
   ├── Scan 8-mers → filter by periodicity + support + complexity
   ├── Grow by Shannon entropy (cap 11bp)
   ├── Discover links (exact co-occurrence, stable spacing)
   ├── Assemble chain → enrichment (pairwise distances + occupancy ≥30%)
-  └── → chains.json
+  └── → chains.json (families[]: motifs + claimed array whitelist)
   │
   ▼
-motif_cut -m chains.json
-  ├── Scan arrays for anchor sites (both strands)
+alphasplitter cut -m chains.json
+  ├── Partition arrays by family (each array gets cut with only its
+  │     family's motifs — no cross-SF contamination)
+  ├── Scan both strands, strand-normalize
   ├── Cut at first-site positions → monomers
-  ├── Classify: letter (indel-defined) + subtype (site variants)
+  ├── Classify per family: letter (indel-defined) + subtype (site variants)
   ├── site_order: abcde, ab-de, abdebcde (dimers)
   ├── site_structure: 0:a18b24c43d18e:57
-  └── → monomers.tsv + HOR strings
+  └── → monomers.tsv, monomers_hor.tsv, letters/<family>/<letter>.tsv,
+       family_consensus.fa, families.json
   │
   ▼
-annotate_cenpb
+alphasplitter annotate
   ├── CENP-B box scoring (nTTCGnnnnAnnCGGGn, both strands)
   ├── 9-char and 17-char CIGAR notation
   └── → annotated.tsv
@@ -74,23 +78,23 @@ A satellite monomer is a chain of conserved anchor sites separated by variable s
   sequence     matters!    sequence     matters!   sequence
 ```
 
-**Letter** = defined by indels only (which sites present/deleted + spacer length changes), NOT by substitutions.
+**Letter** = defined by indels only (which sites are present/deleted + spacer length changes), NOT by substitutions. Letters are assigned locally within each SF family: "A" in `P171SF0` is not the same object as "A" in `P171SF1`; the `family` column disambiguates.
 
-**Site presence detection:** A site is present if the distance between its neighbors matches expected — no fuzzy sequence matching needed.
+**Site presence detection:** a site is present if the distance between its neighbors matches expected — no fuzzy sequence matching needed.
 
-## Binaries
+## Subcommands
 
-| Binary | Purpose |
-|--------|---------|
-| `discover_chains` | Chain-first anchor discovery + enrichment + multi-SF/period |
-| `motif_cut` | Array cutting + alphabet + HOR + site_structure |
-| `annotate_cenpb` | Add CENP-B box annotation to monomer TSV |
-| `find_box` | Search for any degenerate box pattern (CENP-B, TIGD4, etc.) |
-| `cenpb_spacing` | CENP-B box spacing analysis at single-base resolution |
-| `find_periodic_boxes` | De novo periodic box discovery from paired k-mers |
-| `discover_motifs` | v1 conservation-profile motif discovery |
-| `motif_graph` | Motif transition graph (diagnostic) |
-| `find_phase` | Phase optimization experiment |
+| Subcommand | Purpose |
+|---|---|
+| `run` | End-to-end: discover → cut → annotate |
+| `discover` | Chain-first anchor discovery + enrichment + multi-SF/period |
+| `cut` | Array → monomers, letter/subtype classification, per-letter dumps |
+| `annotate` | Add CENP-B box columns to a monomers TSV |
+| `find-box` | Search for any degenerate box pattern (CENP-B, TIGD4, etc.) |
+| `spacing` | CENP-B box spacing analysis at single-base resolution |
+| `find-periodic-boxes` | De novo periodic box discovery from paired k-mers |
+| `reads {build-hmms,scan,classify,extract,alphabet}` | ONT read processing (HPC-HMM workflow) |
+| `dev {find-phase,motif-graph}` | Hidden research subcommands |
 
 ## Validated on
 
@@ -117,20 +121,33 @@ Alexandrov validation: 38/39 SF types recovered, 96.3% of monomers assigned.
 
 ## Output Format (annotated TSV)
 
+Manifest header (one `#` block from `cut`, one from `annotate`):
+
 ```
-#alphasplitter v1.0.2
-#chain_sites: a=ACATCACAAAG b=AGAATGCTTCT c=GAAGATATTTC d=TCCACTTGCAG e=AAAGAGTGTTT
-#CENP-B_box_ref: nTTCGnnnnAnnCGGGn (17bp), searched on BOTH strands
+#alphasplitter v0.2.0 / cut
+#input: arrays.10kb.fasta
+#motifs_source: chains.json
+#family P171SF0 period=171 sites: M1=ACATCACAAAG M2=AGAATGCTTCT ...
+#columns: family array_id strand monomer_idx start end length letter subtype
+#          site_order site_structure sites distances sequence
+#alphasplitter v0.2.0 / annotate
+#CENP-B_box_ref: nTTCGnnnnAnnCGGGn (17bp, searched on BOTH strands)
+#cenpb_labels: B+ (score>=7), B? (score=6), B- (score<=5)
 ```
+
+Columns:
 
 | Column | Description |
 |--------|-------------|
-| chr/array_id | Chromosome or array identifier |
-| start, end | Genomic/array coordinates |
-| letter | Structural type (indel-defined) |
-| site_order | Chain sites: abcde, ab-de, abdebcde |
-| site_structure | gap:sites_with_distances:gap |
-| cenpb | B+ (≥7/9), B? (6/9), B- (≤5/9) |
+| family | SF family that cut this monomer (e.g. `P171SF0`) |
+| array_id | Original FASTA name (no `_rc` suffix) |
+| strand | `+` kept forward, `-` array was revcomped during strand normalization |
+| start, end | Coordinates within the array |
+| letter | Structural type (indel-defined), local to family |
+| subtype | Letter + site sequence variant |
+| site_order | Chain sites: `abcde`, `ab-de`, `abdebcde` |
+| site_structure | `gap_before:sites_with_distances:gap_after` |
+| cenpb | `B+` (≥7/9), `B?` (6/9), `B-` (≤5/9) |
 | cenpb_cigar17 | Full 17-char CIGAR |
 | sequence | Monomer DNA sequence |
 
