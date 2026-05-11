@@ -96,8 +96,9 @@ See `example_output/` for the SUMMARY and per-chromosome table from the KICH tes
 
 | file | description |
 |---|---|
-| `marker_chr_map.tsv` | `canonical_23mer ⟶ field_idx ⟶ CHM13_array_id ⟶ chromosome ⟶ count_in_CHM13` — 1 260 118 array-specific alpha-satellite marker 23-mers (DF = 1 over the 65 BLAST-verified CHM13 alpha-satellite arrays > 100 kb). The map column 4 (chromosome) is what drives the per-chromosome aggregation. |
-| `markers_k23.kmc_*` | auto-built by the script on the first `--refpack` run (a KMC DB of the marker k-mers, for fast intersection with the sample DBs). |
+| **`alpha_23mer_annotation.tsv`** (`.gz`) | **the alpha 23-mer annotation** — every one of the 1 541 816 canonical alpha-satellite 23-mers, with: `kmer · DF · n_chr · chromosomes · chr_unique · n_arrays · arrays · total_count_CHM13 · lowcomplexity · ultra_abundant_donor`. `DF` = in how many of the 65 CHM13 alpha arrays it occurs; `chromosomes` = comma-separated distinct chromosomes among those arrays; `chr_unique = yes` ⇒ all its arrays are on one chromosome (1 339 947 such markers — these are the ones usable for per-chromosome difference). For a custom per-chromosome difference: `awk -F'\t' '$5=="yes" && $2>=N && $9=="no"'` → group by column 4 → intersect with the sample KMC counts → ratio. The full table also supports per-array and DF-weighted analyses. |
+| `marker_chr_map.tsv` | the **DF = 1 slice** used by `satkmer_compare.sh` step 3: `canonical_23mer ⟶ field_idx ⟶ CHM13_array_id ⟶ chromosome ⟶ count_in_CHM13` (1 260 118 strictly-one-array markers). Column 4 (chromosome) drives the per-chromosome aggregation. |
+| `markers_k23.kmc_*` | auto-built by the script on the first `--refpack` run (a KMC DB of the `marker_chr_map.tsv` k-mers, for fast intersection with the sample DBs). |
 | `canonical_alpha.fa` | one canonical alpha-satellite monomer (~170 bp) — for BLAST sanity checks. |
 | `clean_alpha_k23_DF1.txt` | all clean alpha 23-mers (1 530 806 canonical → 3 061 612 with reverse complements, one per line). |
 | `clean_alpha_k23_DF4.txt` | conserved subset (present in ≥ 4 of the 65 alpha arrays): 60 341 → 120 682. Good precision/recall balance for read extraction. |
