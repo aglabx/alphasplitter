@@ -36,7 +36,7 @@ pub fn run_from_args(args: Vec<String>) {
         if !header_done {
             writeln!(out, "#alphasplitter v{} / annotate", env!("CARGO_PKG_VERSION")).unwrap();
             writeln!(out, "#CENP-B_box_ref: nTTCGnnnnAnnCGGGn (17bp, searched on BOTH strands)").unwrap();
-            writeln!(out, "#cenpb_labels: B+ (score>=7), B? (score=6), B- (score<=5)").unwrap();
+            writeln!(out, "#cenpb_labels: B+ (score==9), B? (score 7-8), B- (score<=6)").unwrap();
             writeln!(out, "#columns_added: {}", cenpb_cols.replace('\t', " ")).unwrap();
             writeln!(out, "{}\t{}", line, cenpb_cols).unwrap();
             header_done = true;
@@ -105,12 +105,14 @@ pub fn run_from_args(args: Vec<String>) {
             }
         }
 
-        let cenpb_label = if best_score >= 7 { "B+" } else if best_score == 6 { "B?" } else { "B-" };
-        let pos_str = if best_score >= 6 { format!("{}", best_pos) } else { ".".to_string() };
-        let strand_str = if best_score >= 6 { format!("{}", best_strand) } else { ".".to_string() };
-        let c9_str = if best_score >= 6 { &best_cigar9 } else { "." };
-        let c17_str = if best_score >= 6 { &best_cigar17 } else { "." };
-        let seq_str = if best_score >= 6 { &best_seq } else { "." };
+        // Stricter thresholds: only perfect matches at all 9 conserved positions count as B+,
+        // 7-8 matches are reported as B? (degenerate but still informative), the rest as B-.
+        let cenpb_label = if best_score == 9 { "B+" } else if best_score >= 7 { "B?" } else { "B-" };
+        let pos_str = if best_score >= 7 { format!("{}", best_pos) } else { ".".to_string() };
+        let strand_str = if best_score >= 7 { format!("{}", best_strand) } else { ".".to_string() };
+        let c9_str = if best_score >= 7 { &best_cigar9 } else { "." };
+        let c17_str = if best_score >= 7 { &best_cigar17 } else { "." };
+        let seq_str = if best_score >= 7 { &best_seq } else { "." };
 
         writeln!(out, "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
             line, cenpb_label, best_score, pos_str, strand_str, c9_str, c17_str, seq_str).unwrap();
