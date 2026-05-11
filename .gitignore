@@ -17,3 +17,7 @@ Cargo.lock
 /annotated.tsv
 /phase_score.tsv
 /letters/
+
+# editor / agent config
+/.claude
+/temp
