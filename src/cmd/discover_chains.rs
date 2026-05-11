@@ -1081,15 +1081,23 @@ fn discover_links(
                 if pos_i.is_empty() || pos_j.is_empty() { continue; }
 
                 let mut found_in_array = false;
+                // pos_j is sorted ascending by construction (Phase 1 fills it left-to-right).
+                // For each pi, only pj in window [pi + k + expected_spacer ± max_sd*3] can
+                // produce d = pj - pi - k with |d - expected_spacer| <= max_sd*3. Binary
+                // search via partition_point reduces inner cost from O(K_i * K_j) to
+                // O(K_i * log K_j + matches). Lower bound clamped to pi+1 to preserve the
+                // pj > pi requirement (and avoid usize underflow when computing d).
+                let half_window = max_sd * 3;
                 for &pi in pos_i {
-                    for &pj in pos_j {
-                        if pj > pi {
-                            let d = (pj - pi) as i32 - k as i32;
-                            if (d - expected_spacer as i32).unsigned_abs() <= max_sd as u32 * 3 {
-                                spacers.push(d);
-                                found_in_array = true;
-                            }
-                        }
+                    let target = pi + k + expected_spacer;
+                    let lo = std::cmp::max(target.saturating_sub(half_window), pi + 1);
+                    let hi = target.saturating_add(half_window);
+                    let i_lo = pos_j.partition_point(|&x| x < lo);
+                    let i_hi = pos_j.partition_point(|&x| x <= hi);
+                    for &pj in &pos_j[i_lo..i_hi] {
+                        let d = (pj - pi) as i32 - k as i32;
+                        spacers.push(d);
+                        found_in_array = true;
                     }
                 }
                 if found_in_array { arrays_with_link += 1; }
