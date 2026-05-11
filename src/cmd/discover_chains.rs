@@ -185,7 +185,11 @@ pub fn run_from_args(argv: Vec<String>) {
         }
     }
     let mut sorted_periods: Vec<(usize, usize)> = period_counts.into_iter().collect();
-    sorted_periods.sort_by(|a, b| b.1.cmp(&a.1));
+    // Tie-break by period ascending so the iteration order is deterministic across runs
+    // (HashMap iteration is randomized; without the second key, equal-count periods would
+    // shuffle and the per-period claim order would change run-to-run, propagating to
+    // different chains.json output for low-seed-count families).
+    sorted_periods.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
 
     // If specific period requested, use only that. Otherwise, process all with ≥5 arrays.
     let periods_to_process: Vec<usize> = if args.period > 0 {
@@ -380,7 +384,7 @@ pub fn run_from_args(argv: Vec<String>) {
     eprintln!("  {} after low-complexity filter", candidates.len());
 
     // Sort by score (support * concentration) and take top
-    candidates.sort_by(|a, b| b.score().partial_cmp(&a.score()).unwrap());
+    candidates.sort_by(|a, b| b.score().partial_cmp(&a.score()).unwrap().then_with(|| a.hash.cmp(&b.hash)));
     candidates.truncate(args.max_anchors);
     eprintln!("  Kept top {} candidates", candidates.len());
 
@@ -946,7 +950,7 @@ fn grow_sites(sites: Vec<Site>, arrays: &[(String, Vec<u8>)], _n_arrays: usize, 
 
 fn enforce_spacers(mut sites: Vec<Site>, _period: usize) -> Vec<Site> {
     // Sort by position
-    sites.sort_by_key(|s| s.position_mod_p);
+    sites.sort_by(|a, b| a.position_mod_p.cmp(&b.position_mod_p).then_with(|| a.sequence.cmp(&b.sequence)));
 
     // 1. Remove exact duplicates (same sequence) — keep highest support
     let _before = sites.len();
@@ -991,7 +995,7 @@ fn enforce_spacers(mut sites: Vec<Site>, _period: usize) -> Vec<Site> {
     let mut filtered: Vec<Site> = sites.into_iter().zip(keep).filter(|(_, k)| *k).map(|(s, _)| s).collect();
 
     // 3. Merge overlapping sites (position + length overlaps with next)
-    filtered.sort_by_key(|s| s.position_mod_p);
+    filtered.sort_by(|a, b| a.position_mod_p.cmp(&b.position_mod_p).then_with(|| a.sequence.cmp(&b.sequence)));
     let mut merged: Vec<Site> = Vec::new();
     for site in filtered {
         if let Some(prev) = merged.last() {
@@ -1125,7 +1129,7 @@ fn discover_links(
         })
         .collect();
 
-    links.sort_by(|a, b| b.support.partial_cmp(&a.support).unwrap());
+    links.sort_by(|a, b| b.support.partial_cmp(&a.support).unwrap().then_with(|| (a.from_site, a.to_site).cmp(&(b.from_site, b.to_site))));
     links
 }
 
@@ -1137,7 +1141,7 @@ fn assemble_chains(sites: &[Site], links: &[Link], period: usize) -> Vec<Chain> 
     // Simple approach: sort all sites by position_mod_p → this IS the chain order.
     // Then find which consecutive pairs have supporting links.
     let mut ordered: Vec<usize> = (0..sites.len()).collect();
-    ordered.sort_by_key(|&i| sites[i].position_mod_p);
+    ordered.sort_by(|&i, &j| sites[i].position_mod_p.cmp(&sites[j].position_mod_p).then_with(|| sites[i].sequence.cmp(&sites[j].sequence)).then_with(|| i.cmp(&j)));
 
     // Build link lookup
     let mut link_map: HashMap<(usize, usize), usize> = HashMap::new();
@@ -1184,7 +1188,7 @@ fn assemble_chains(sites: &[Site], links: &[Link], period: usize) -> Vec<Chain> 
 
 fn cluster_sites(mut sites: Vec<Site>, k: usize, p: usize) -> Vec<Site> {
     // Merge sites with overlapping mod-P positions (within k)
-    sites.sort_by_key(|s| s.position_mod_p);
+    sites.sort_by(|a, b| a.position_mod_p.cmp(&b.position_mod_p).then_with(|| a.sequence.cmp(&b.sequence)));
 
     let mut merged: Vec<Site> = Vec::new();
     for site in sites {
