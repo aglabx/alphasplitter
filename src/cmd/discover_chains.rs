@@ -1053,11 +1053,15 @@ fn discover_links(
     }).collect();
 
     // For each pair of sites, compute spacer distribution
-    let mut links: Vec<Link> = Vec::new();
-
-    for si in 0..n_sites {
-        for sj in 0..n_sites {
-            if si == sj { continue; }
+    // Outer pair loop flattened to a single 0..n_sites*n_sites range and parallelized
+    // via rayon. Each (si, sj) is independent: only reads from immutable refs, builds
+    // a local spacers vec, returns Option<Link>. Final sort below makes order irrelevant.
+    let mut links: Vec<Link> = (0..n_sites * n_sites)
+        .into_par_iter()
+        .filter_map(|idx| {
+            let si = idx / n_sites;
+            let sj = idx % n_sites;
+            if si == sj { return None; }
 
             let expected_spacer = {
                 let pi = sites[si].position_mod_p;
@@ -1065,8 +1069,7 @@ fn discover_links(
                 if pj > pi { pj - pi - k } else { p - pi + pj - k }
             };
 
-            // Only consider if expected spacer is reasonable
-            if expected_spacer > p { continue; }
+            if expected_spacer > p { return None; }
 
             let mut spacers: Vec<i32> = Vec::new();
             let mut arrays_with_link = 0;
@@ -1082,7 +1085,6 @@ fn discover_links(
                     for &pj in pos_j {
                         if pj > pi {
                             let d = (pj - pi) as i32 - k as i32;
-                            // Check if close to expected (within period)
                             if (d - expected_spacer as i32).unsigned_abs() <= max_sd as u32 * 3 {
                                 spacers.push(d);
                                 found_in_array = true;
@@ -1094,24 +1096,26 @@ fn discover_links(
             }
 
             let support = arrays_with_link as f64 / n_arrays as f64;
-            if support < min_support || spacers.len() < 5 { continue; }
+            if support < min_support || spacers.len() < 5 { return None; }
 
             let mean = spacers.iter().sum::<i32>() as f64 / spacers.len() as f64;
             let variance = spacers.iter().map(|&s| (s as f64 - mean).powi(2)).sum::<f64>() / spacers.len() as f64;
             let sd = variance.sqrt();
 
             if sd <= max_sd as f64 {
-                links.push(Link {
+                Some(Link {
                     from_site: si,
                     to_site: sj,
                     spacer_mean: mean,
                     spacer_sd: sd,
                     support,
                     n_arrays: arrays_with_link,
-                });
+                })
+            } else {
+                None
             }
-        }
-    }
+        })
+        .collect();
 
     links.sort_by(|a, b| b.support.partial_cmp(&a.support).unwrap());
     links
